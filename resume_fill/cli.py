@@ -97,7 +97,7 @@ def cmd_gen(args: argparse.Namespace) -> int:
     from . import evidence, llm
     from . import jd as jd_module
     from .config import settings
-    from .pipeline import generate, run_dir
+    from .pipeline import run, run_dir
     from .profile import ProfileError, load_profile
     from .render import RenderError
 
@@ -132,30 +132,57 @@ def cmd_gen(args: argparse.Namespace) -> int:
     job = jd_module.parse(posting, lambda s, u: llm.complete_json(s, u, cfg=cfg))
     corpus = evidence.load(cfg.EVIDENCE_PATH)
     out_dir = Path(args.out) if args.out else run_dir(job, cfg)
+    mode = "cover" if args.cover else ("resume" if args.resume else "both")
 
     print("== resume-fill gen ==")
     print(f"{INFO} posting: {job.summary_line()}")
     print(f"{INFO} record:  {len(profile.experience)} roles, {len(profile.projects)} projects, "
           f"{len(corpus.items)} evidence items")
+    print(f"{INFO} mode:    {mode}")
     print(f"{INFO} output:  {out_dir}")
 
     def progress(attempt) -> None:
         print(f"  [{attempt.number}/{cfg.MAX_ITER}] {attempt.note()}")
 
     try:
-        result = generate(
+        result = run(
             profile, job, corpus, cfg,
             lambda s, u: llm.complete_json(s, u, cfg=cfg),
-            out_dir=out_dir, on_progress=progress,
+            out_dir=out_dir, mode=mode, on_progress=progress,
         )
     except (llm.LLMError, RenderError) as exc:
         print(f"{BAD} {exc}")
         return 1
 
-    return _report_run(result, cfg)
+    print()
+    code = 0
+    if result.resume is not None:
+        code |= _report_resume(result.resume, cfg)
+    if result.cover is not None:
+        code |= _report_cover(result.cover)
+    print(f"{INFO} report: {result.report_path}")
+    return 1 if code else 0
 
 
-def _report_run(result, cfg) -> int:
+def _report_cover(cover_run) -> int:
+    best = cover_run.best
+    if best.violations:
+        print(f"{BAD} the grounding gate rejected every cover letter - no PDF was written")
+        for violation in best.violations[:10]:
+            print(f"     - [{violation.kind}] {violation}")
+        return 1
+    print(f"{OK} {best.rendered.pdf_path}")
+    print(f"{INFO} {best.letter.word_count()} words, {len(best.letter.paragraphs)} paragraphs, "
+          f"addressed to {best.letter.addressee}")
+    if cover_run.blocked_terms:
+        print(f"{INFO} the gate blocked these claims: " + ", ".join(cover_run.blocked_terms[:12]))
+    if not cover_run.ok:
+        print(f"{BAD} the cover letter PDF did not survive its own parse check")
+        return 1
+    return 0
+
+
+def _report_resume(result, cfg) -> int:
     """Exit code policy (PLAN.md open question 5, resolved).
 
     A PDF that does not parse is a build failure, always — that is the one guarantee this
@@ -165,12 +192,10 @@ def _report_run(result, cfg) -> int:
     it into a failure for anyone who wants the loop to be a hard gate.
     """
     best = result.best
-    print()
     if best.violations:
-        print(f"{BAD} the grounding gate rejected every attempt - no PDF was written")
+        print(f"{BAD} the grounding gate rejected every résumé attempt - no PDF was written")
         for violation in best.violations[:10]:
             print(f"     - [{violation.kind}] {violation}")
-        print(f"{INFO} report: {result.report_path}")
         return 1
 
     print(f"{OK} {best.rendered.pdf_path}")
@@ -185,7 +210,6 @@ def _report_run(result, cfg) -> int:
               + ", ".join(g.keyword for g in real[:12]))
     if result.blocked_terms:
         print(f"{INFO} the gate blocked these claims: " + ", ".join(result.blocked_terms[:12]))
-    print(f"{INFO} report: {result.report_path}")
 
     if not result.ok:
         print(f"{BAD} the PDF did not survive its own parse check - fix before sending")
@@ -277,6 +301,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_gen = sub.add_parser("gen", help="job description -> tailored, grounded, verified résumé PDF")
     p_gen.add_argument("--jd", required=True, metavar="SOURCE",
                        help="job description: a file path, an https URL, or - for stdin")
+    mode = p_gen.add_mutually_exclusive_group()
+    mode.add_argument("--resume", action="store_true", help="résumé only")
+    mode.add_argument("--cover", action="store_true", help="cover letter only")
+    mode.add_argument("--both", action="store_true", help="both (the default)")
     p_gen.add_argument("--out", metavar="DIR", help="output directory (default: out/<company>-<role>-<date>)")
     p_gen.add_argument("--max-iter", type=int, metavar="N", help="rewrite attempts (default: MAX_ITER)")
     p_gen.add_argument("--threshold", type=float, metavar="N", help="stop at this score (default: SCORE_THRESHOLD)")

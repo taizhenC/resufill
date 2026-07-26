@@ -12,13 +12,14 @@ never writes a fact, so a fact can never be wrong.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 
 from jinja2 import ChoiceLoader, Environment, FileSystemLoader, StrictUndefined, TemplateNotFound
 from markupsafe import Markup
 
 from .config import Settings
-from .document import ResumeDoc
+from .document import CoverLetter, ResumeDoc
 from .profile import Profile
 
 SECTION_TITLES = {
@@ -196,15 +197,49 @@ def html_to_pdf(html: str, out_path: Path, cfg: Settings) -> None:
         ) from exc
 
 
-def render_resume(
-    doc: ResumeDoc, profile: Profile, out_dir: Path, cfg: Settings, *, stem: str = "resume"
-) -> Rendered:
-    html = render_html(doc, profile, cfg)
-    html_path = out_dir / f"{stem}.html"
-    pdf_path = out_dir / f"{stem}.pdf"
+def _write(html: str, out_dir: Path, stem: str, cfg: Settings) -> Rendered:
     out_dir.mkdir(parents=True, exist_ok=True)
-    # Kept next to the PDF: when a bullet fails the round-trip assertion, the first
-    # question is always whether it made it into the HTML.
+    html_path, pdf_path = out_dir / f"{stem}.html", out_dir / f"{stem}.pdf"
+    # The HTML is kept next to the PDF: when a bullet fails the round-trip assertion, the
+    # first question is always whether it made it into the HTML.
     html_path.write_text(html, encoding="utf-8")
     html_to_pdf(html, pdf_path, cfg)
     return Rendered(pdf_path=pdf_path, html_path=html_path, page_count=page_count(pdf_path))
+
+
+def render_resume(
+    doc: ResumeDoc, profile: Profile, out_dir: Path, cfg: Settings, *, stem: str = "resume"
+) -> Rendered:
+    return _write(render_html(doc, profile, cfg), out_dir, stem, cfg)
+
+
+# -------------------------------------------------------- cover letter ----
+
+
+def render_cover_html(
+    letter: CoverLetter, profile: Profile, cfg: Settings, *, today: date | None = None
+) -> str:
+    env = environment(cfg)
+    try:
+        css = env.get_template("cover_letter.css").render(
+            page_format=cfg.PAGE_FORMAT, margin_in=cfg.PAGE_MARGIN_IN, font_pt=cfg.FONT_PT
+        )
+        page = env.get_template("cover_letter.html.j2")
+    except TemplateNotFound as exc:
+        raise RenderError(f"template not found: {exc.name}") from exc
+    return page.render(
+        name=profile.basics.name,
+        contact=profile.basics.contact_line(),
+        date=(today or date.today()).strftime("%d %B %Y"),
+        subject=letter.subject,
+        addressee=letter.addressee or cfg.COVER_LETTER_FALLBACK_ADDRESSEE,
+        paragraphs=[p.text for p in letter.paragraphs],
+        signoff=letter.signoff or "Sincerely,",
+        css=Markup(css),  # see render_html: escaping the stylesheet silently breaks it
+    )
+
+
+def render_cover_letter(
+    letter: CoverLetter, profile: Profile, out_dir: Path, cfg: Settings, *, stem: str = "cover_letter"
+) -> Rendered:
+    return _write(render_cover_html(letter, profile, cfg), out_dir, stem, cfg)

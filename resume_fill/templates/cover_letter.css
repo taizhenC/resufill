@@ -1,0 +1,54 @@
+/* Same constraints as resume.css, and for the same reason: the text layer is what gets
+ * read. A cover letter is more often pasted into a textarea than parsed by an ATS, which
+ * makes clean extraction matter more here, not less. */
+
+@page {
+  size: {{ page_format }};
+  margin: {{ margin_in }}in;
+}
+
+html {
+  font-size: {{ font_pt }}pt;
+}
+
+body {
+  font-family: "Helvetica Neue", Helvetica, Arial, "Liberation Sans", sans-serif;
+  color: #000;
+  line-height: 1.45;
+  margin: 0;
+  text-align: left;
+}
+
+header {
+  margin-bottom: 1.4em;
+}
+
+h1 {
+  font-size: 1.45rem;
+  font-weight: 700;
+  margin: 0 0 0.15em;
+}
+
+.contact {
+  font-size: 0.94rem;
+  margin: 0;
+}
+
+.date,
+.greeting,
+.signoff {
+  margin: 0 0 0.9em;
+}
+
+.subject {
+  font-weight: 700;
+  margin: 0 0 0.9em;
+}
+
+p.body-paragraph {
+  margin: 0 0 0.85em;
+}
+
+.signature {
+  margin-top: 1.6em;
+}

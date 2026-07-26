@@ -22,9 +22,10 @@ Three rules, in order of how often they catch something real:
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 
-from .document import ResumeDoc
+from .document import CoverLetter, ResumeDoc
 from .lexicon import technical_tokens
 from .profile import Profile
 from .source import SourceIndex, resolve, supporting_text
@@ -49,8 +50,16 @@ class Violation:
         return f"{self.where}: {self.detail}"
 
 
-def _claims_against(text: str, supporting: str, declared: set[str], where: str) -> list[Violation]:
-    """Rules 2 and 3, for one piece of prose."""
+def _claims_against(
+    text: str, supporting: str, declared: set[str], where: str, allowed: set[str] = frozenset()
+) -> list[Violation]:
+    """Rules 2 and 3, for one piece of prose.
+
+    `allowed` exists for the cover letter: naming the company you are writing to is not a
+    claim about yourself. Without it, applying to DeepMind or PostgreSQL Inc. would fail
+    every draft, because a CamelCase company name is indistinguishable from a CamelCase
+    product name to the term rule.
+    """
     found: list[Violation] = []
     for claim in numbers(text):
         if not supports_number(supporting, claim):
@@ -61,7 +70,7 @@ def _claims_against(text: str, supporting: str, declared: set[str], where: str) 
                 )
             )
     for term in technical_tokens(text):
-        if term.casefold() in declared or contains_term(supporting, term):
+        if term.casefold() in declared or term.casefold() in allowed or contains_term(supporting, term):
             continue
         found.append(
             Violation(
@@ -180,6 +189,44 @@ def _check_certifications(doc: ResumeDoc, index: SourceIndex) -> list[Violation]
     return found
 
 
+def check_letter(
+    letter: CoverLetter, profile: Profile, index: SourceIndex, *, allowed_terms: Iterable[str] = ()
+) -> list[Violation]:
+    """The same gate, applied to prose.
+
+    A cover letter is where invention is most tempting: it is expected to be enthusiastic,
+    and nobody expects it to be checkable. So it is checked — every paragraph cites, every
+    number is in the cited source, every technology is too.
+    """
+    declared = {s.casefold() for s in profile.declared_skills()}
+    allowed = {t.casefold() for t in allowed_terms}
+    violations: list[Violation] = []
+
+    if not letter.paragraphs:
+        violations.append(Violation("empty_letter", "letter", "has no paragraphs"))
+    for where, paragraph in letter.cited():
+        if not paragraph.text.strip():
+            violations.append(Violation("empty_bullet", where, "is empty"))
+            continue
+        if not paragraph.source_ids:
+            violations.append(
+                Violation("uncited_bullet", where, f'cites nothing: "{truncate(paragraph.text, 70)}"')
+            )
+            continue
+        _, missing = resolve(index, paragraph.source_ids)
+        if missing:
+            violations.append(
+                Violation("unknown_source", where, f"cites unknown id(s): {', '.join(missing)}")
+            )
+            continue
+        violations.extend(
+            _claims_against(
+                paragraph.text, supporting_text(index, paragraph.source_ids), declared, where, allowed
+            )
+        )
+    return violations
+
+
 # --------------------------------------------------------------- retry ----
 
 _ADVICE = {
@@ -195,6 +242,7 @@ _ADVICE = {
     "undeclared_skill": "The skills block may only contain skills already in the record.",
     "empty_entry": "Either write bullets for the entry or do not select it.",
     "empty_bullet": "Remove empty bullets.",
+    "empty_letter": "Write the letter.",
 }
 
 

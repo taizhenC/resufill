@@ -163,7 +163,10 @@ def technical_tokens(text: str) -> list[str]:
             out.append(term)
 
     for raw in _TOKEN.findall(text or ""):
-        token = raw.strip(".,;:")
+        # Strip the possessive: "DeepMind's platform" names DeepMind, and leaving the "'s"
+        # on makes the token fail the shape test and slip through unchecked. (Curated terms
+        # are unaffected — contains_term already treats the apostrophe as a boundary.)
+        token = re.sub(r"['’]s$", "", raw.strip(".,;:"))
         if not token or token in _NOT_A_TOOL or squash(token) in seen:
             continue
         if _LOOKS_TECHNICAL.match(token):

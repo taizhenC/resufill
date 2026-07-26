@@ -18,7 +18,7 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .document import ResumeDoc
+from .document import CoverLetter, ResumeDoc
 from .profile import Profile
 from .textutil import normalize, truncate
 
@@ -101,6 +101,40 @@ def verify(
     return VerifyReport(
         ok=not missing, page_count=pages, missing=missing, checks=checks, text=raw
     )
+
+
+def verify_letter(
+    pdf_path: Path,
+    letter: CoverLetter,
+    profile: Profile,
+    *,
+    max_pages: int = 1,
+    page_count: int | None = None,
+) -> VerifyReport:
+    """The same round trip for the letter. A cover letter is more often pasted into a
+    textarea than parsed by an ATS, which makes clean extraction matter more, not less."""
+    raw = extract_text(pdf_path)
+    haystack = flatten(raw)
+    missing: list[str] = []
+    checks: dict[str, bool] = {}
+
+    for label, needle in [("name", profile.basics.name), ("addressee", letter.addressee)]:
+        checks[label] = bool(needle) and flatten(needle) in haystack
+        if needle and not checks[label]:
+            missing.append(f"{label}: {needle}")
+
+    for where, paragraph in letter.cited():
+        present = flatten(paragraph.text) in haystack
+        checks[f"paragraph:{where}"] = present
+        if not present:
+            missing.append(f"{where}: {truncate(paragraph.text, 80)}")
+
+    pages = page_count if page_count is not None else _count_pages(pdf_path)
+    checks["page_budget"] = pages <= max_pages
+    if not checks["page_budget"]:
+        missing.append(f"length: {pages} pages, budget is {max_pages}")
+
+    return VerifyReport(ok=not missing, page_count=pages, missing=missing, checks=checks, text=raw)
 
 
 def _expected_headings(doc: ResumeDoc, profile: Profile) -> list[str]:

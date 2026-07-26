@@ -29,14 +29,15 @@ from . import ground
 from . import report as report_module
 from . import score as score_module
 from .config import Settings
-from .document import ResumeDoc
+from .document import CoverLetter, ResumeDoc
 from .evidence import Corpus
 from .jd import JobDescription
 from .llm import LLMCall
 from .profile import Profile
-from .render import Rendered, render_resume
+from .render import Rendered, render_cover_letter, render_resume
 from .score import Score
-from .verify import VerifyReport, verify
+from .source import SourceIndex
+from .verify import VerifyReport, verify, verify_letter
 
 
 @dataclass
@@ -100,6 +101,13 @@ def run_dir(jd: JobDescription, cfg: Settings, *, today: date | None = None) -> 
     return cfg.OUT_DIR / name
 
 
+def source_index(profile: Profile, corpus: Corpus | None) -> SourceIndex:
+    index = profile.sources()
+    if corpus:
+        index.update(corpus.sources())
+    return index
+
+
 def generate(
     profile: Profile,
     jd: JobDescription,
@@ -109,12 +117,11 @@ def generate(
     *,
     out_dir: Path,
     on_progress=None,
+    write_report: bool = True,
 ) -> RunResult:
     from .tailor import tailor
 
-    index = profile.sources()
-    if corpus:
-        index.update(corpus.sources())
+    index = source_index(profile, corpus)
 
     attempts: list[Attempt] = []
     blocked: list[str] = []
@@ -163,17 +170,183 @@ def generate(
     (out_dir / "resume.json").write_text(
         json.dumps(best.doc.model_dump(), indent=2, ensure_ascii=False), encoding="utf-8"
     )
-    report_path = out_dir / "report.md"
-    report_path.write_text(
-        report_module.build(
-            doc=best.doc, profile=profile, jd=jd, index=index,
-            score=best.score or score_module.score(best.doc, profile, jd, index),
-            verify_report=best.verify_report, iterations=len(attempts),
-            threshold=cfg.SCORE_THRESHOLD, blocked_terms=blocked, violations=best.violations,
-        ),
-        encoding="utf-8",
-    )
-    return RunResult(
-        out_dir=out_dir, attempts=attempts, best=best, report_path=report_path,
+    result = RunResult(
+        out_dir=out_dir, attempts=attempts, best=best, report_path=out_dir / "report.md",
         blocked_terms=blocked, threshold=cfg.SCORE_THRESHOLD,
+    )
+    if write_report:
+        # `run()` writes a combined report when a cover letter is in play, so it asks for
+        # this to be skipped rather than having it written twice.
+        result.report_path.write_text(
+            resume_report(result, profile, jd, index, cfg), encoding="utf-8"
+        )
+    return result
+
+
+def resume_report(
+    result: RunResult, profile: Profile, jd: JobDescription, index: SourceIndex, cfg: Settings
+) -> str:
+    best = result.best
+    return report_module.build(
+        doc=best.doc, profile=profile, jd=jd, index=index,
+        score=best.score or score_module.score(best.doc, profile, jd, index),
+        verify_report=best.verify_report, iterations=len(result.attempts),
+        threshold=cfg.SCORE_THRESHOLD, blocked_terms=result.blocked_terms,
+        violations=best.violations,
+    )
+
+
+# ----------------------------------------------------------- cover letter ----
+
+
+@dataclass
+class CoverAttempt:
+    number: int
+    letter: CoverLetter
+    violations: list[ground.Violation] = field(default_factory=list)
+    verify_report: VerifyReport | None = None
+    rendered: Rendered | None = None
+
+    @property
+    def grounded(self) -> bool:
+        return not self.violations
+
+    def note(self) -> str:
+        if self.violations:
+            return f"letter rejected by the grounding gate ({ground.summarize(self.violations)})"
+        pages = self.verify_report.page_count if self.verify_report else "?"
+        parses = self.verify_report.ok if self.verify_report else False
+        return f"letter {'parses' if parses else 'failed its checks'}, {pages} page(s)"
+
+
+@dataclass
+class CoverRun:
+    attempts: list[CoverAttempt]
+    best: CoverAttempt
+    blocked_terms: list[str]
+
+    @property
+    def ok(self) -> bool:
+        return self.best.grounded and bool(self.best.verify_report and self.best.verify_report.ok)
+
+
+def generate_cover(
+    profile: Profile,
+    jd: JobDescription,
+    corpus: Corpus | None,
+    cfg: Settings,
+    llm_call: LLMCall,
+    *,
+    out_dir: Path,
+    on_progress=None,
+) -> CoverRun:
+    """Grounding-only loop. There is no score for a cover letter and inventing one would
+    be inventing a metric — the résumé's proxy is already an explicitly-labelled proxy."""
+    from . import cover
+
+    index = source_index(profile, corpus)
+    allowed = cover.allowed_terms(jd)
+    attempts: list[CoverAttempt] = []
+    blocked: list[str] = []
+    feedback = ""
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    for number in range(1, max(1, cfg.MAX_ITER) + 1):
+        letter = cover.write(profile, jd, corpus, cfg, llm_call, feedback=feedback)
+        attempt = CoverAttempt(number=number, letter=letter)
+        attempt.violations = ground.check_letter(letter, profile, index, allowed_terms=allowed)
+        attempts.append(attempt)
+        if attempt.violations:
+            blocked = list(dict.fromkeys(blocked + ground.unsupported_terms(attempt.violations)))
+            feedback = ground.feedback(attempt.violations)
+            if on_progress:
+                on_progress(attempt)
+            continue
+
+        attempt.rendered = render_cover_letter(letter, profile, out_dir, cfg)
+        attempt.verify_report = verify_letter(
+            attempt.rendered.pdf_path, letter, profile,
+            max_pages=cfg.COVER_LETTER_MAX_PAGES, page_count=attempt.rendered.page_count,
+        )
+        if on_progress:
+            on_progress(attempt)
+        if attempt.verify_report.ok:
+            break
+        feedback = "The rendered PDF failed its checks:\n" + "\n".join(
+            f"  - {item}" for item in attempt.verify_report.missing[:10]
+        )
+
+    best = max(attempts, key=lambda a: (a.grounded, bool(a.verify_report and a.verify_report.ok)))
+    if best.grounded and best is not attempts[-1]:
+        best.rendered = render_cover_letter(best.letter, profile, out_dir, cfg)
+        best.verify_report = verify_letter(
+            best.rendered.pdf_path, best.letter, profile,
+            max_pages=cfg.COVER_LETTER_MAX_PAGES, page_count=best.rendered.page_count,
+        )
+    (out_dir / "cover_letter.json").write_text(
+        json.dumps(best.letter.model_dump(), indent=2, ensure_ascii=False), encoding="utf-8"
+    )
+    return CoverRun(attempts=attempts, best=best, blocked_terms=blocked)
+
+
+# ------------------------------------------------------------------ run ----
+
+MODES = ("resume", "cover", "both")
+
+
+@dataclass
+class Run:
+    """One invocation of `gen`, in whichever of the three modes (PLAN.md §1)."""
+
+    out_dir: Path
+    mode: str
+    report_path: Path
+    resume: RunResult | None = None
+    cover: CoverRun | None = None
+
+    @property
+    def ok(self) -> bool:
+        return all(part.ok for part in (self.resume, self.cover) if part is not None)
+
+
+def run(
+    profile: Profile,
+    jd: JobDescription,
+    corpus: Corpus | None,
+    cfg: Settings,
+    llm_call: LLMCall,
+    *,
+    out_dir: Path,
+    mode: str = "both",
+    on_progress=None,
+) -> Run:
+    if mode not in MODES:
+        raise ValueError(f"mode must be one of {MODES}, got {mode!r}")
+    index = source_index(profile, corpus)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    report_path = out_dir / "report.md"
+
+    resume_result = None
+    if mode in ("resume", "both"):
+        resume_result = generate(
+            profile, jd, corpus, cfg, llm_call,
+            out_dir=out_dir, on_progress=on_progress, write_report=False,
+        )
+
+    cover_result = None
+    if mode in ("cover", "both"):
+        cover_result = generate_cover(
+            profile, jd, corpus, cfg, llm_call, out_dir=out_dir, on_progress=on_progress
+        )
+
+    sections = []
+    if resume_result is not None:
+        sections.append(resume_report(resume_result, profile, jd, index, cfg))
+    if cover_result is not None:
+        sections.append(report_module.cover_section(cover_result, jd, index))
+    report_path.write_text("\n".join(sections), encoding="utf-8")
+
+    return Run(
+        out_dir=out_dir, mode=mode, report_path=report_path,
+        resume=resume_result, cover=cover_result,
     )

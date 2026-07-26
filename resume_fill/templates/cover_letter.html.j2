@@ -1,0 +1,31 @@
+{# Same shape as resume.html.j2: render.py resolves everything, this decides order and tags.
+   The stylesheet is inlined for the same reason — set_content() has no base URL. #}
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>{{ name }} — cover letter</title>
+<style>{{ css }}</style>
+</head>
+<body>
+
+<header>
+  <h1>{{ name }}</h1>
+  {% if contact %}<p class="contact">{{ contact }}</p>{% endif %}
+</header>
+
+<p class="date">{{ date }}</p>
+{% if subject %}<p class="subject">{{ subject }}</p>{% endif %}
+<p class="greeting">Dear {{ addressee }},</p>
+
+{% for paragraph in paragraphs %}
+<p class="body-paragraph">{{ paragraph }}</p>
+{% endfor %}
+
+<div class="signature">
+  <p class="signoff">{{ signoff }}</p>
+  <p>{{ name }}</p>
+</div>
+
+</body>
+</html>

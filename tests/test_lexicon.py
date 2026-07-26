@@ -33,6 +33,12 @@ def test_technical_tokens_catches_tools_the_lexicon_never_heard_of():
     assert "FooBarDB" in tokens
 
 
+def test_technical_tokens_sees_through_a_possessive():
+    """"DeepMind's platform" names DeepMind. Leaving the "'s" on makes the token fail the
+    shape test and slip through unchecked."""
+    assert "DeepMind" in technical_tokens("DeepMind's platform")
+
+
 def test_technical_tokens_leaves_prose_alone():
     """False positives are worse than misses here: every one becomes a violation the loop
     has to spend an iteration on."""

@@ -147,3 +147,50 @@ def build(
 
     lines += ["## Citations", "", *_citations(doc, index), ""]
     return "\n".join(lines)
+
+
+def cover_section(cover_run, jd: JobDescription, index: SourceIndex) -> str:
+    """The cover letter's half of report.md.
+
+    Shorter than the résumé's because there is no score: inventing one for a letter would
+    be inventing a metric, and the résumé's proxy is already labelled as a proxy. What is
+    worth printing is the same thing that matters for the résumé — what each paragraph is
+    standing on.
+    """
+    best = cover_run.best
+    letter = best.letter
+    lines = [
+        "",
+        f"# Cover letter — {jd.company or 'unknown company'}",
+        "",
+        f"Addressed to: {letter.addressee or '(unset)'} · {letter.word_count()} words · "
+        f"{len(letter.paragraphs)} paragraph(s) · {len(cover_run.attempts)} iteration(s)",
+        "",
+    ]
+    if best.verify_report is not None:
+        lines += [best.verify_report.summary(), ""]
+        if best.verify_report.missing:
+            lines += [f"- {item}" for item in best.verify_report.missing] + [""]
+    if best.violations:
+        lines += [
+            "## Unresolved grounding violations",
+            "",
+            "The loop ended with these outstanding. No cover letter PDF was written.",
+            "",
+            *[f"- [{v.kind}] {v}" for v in best.violations],
+            "",
+        ]
+    if cover_run.blocked_terms:
+        lines += [
+            "## Blocked by the grounding gate",
+            "",
+            *[f"- {term}" for term in cover_run.blocked_terms],
+            "",
+        ]
+    lines += ["## Citations", ""]
+    for where, paragraph in letter.cited():
+        labels = [index[sid].label for sid in paragraph.source_ids if sid in index]
+        lines.append(f"- **{where}** — {paragraph.text}")
+        lines.append(f"  - source: {'; '.join(labels) or '(none)'}")
+    lines.append("")
+    return "\n".join(lines)

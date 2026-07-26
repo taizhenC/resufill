@@ -58,6 +58,8 @@ class Settings(BaseSettings):
 
     # --- Document shape -------------------------------------------------------
     RESUME_MAX_PAGES: int = 1
+    # A cover letter that runs to two pages does not get read; the budget is the point.
+    COVER_LETTER_MAX_PAGES: int = 1
     COVER_LETTER_WORDS: int = 300
     COVER_LETTER_TONE: str = "direct and specific; no filler, no flattery, no restating the job ad"
     # Used when the posting names no addressee (PLAN.md open question 4).
