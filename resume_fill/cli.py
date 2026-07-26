@@ -1,14 +1,16 @@
 """resume-fill — command surface.
 
+    resume-fill init      bootstrap profile.yaml from a LinkedIn export + résumé PDF
     resume-fill doctor    check config, sources and the PDF toolchain
 
-Later milestones add `init`, `blog sync`, `gen` and `linkedin draft` (PLAN.md §6).
+Later milestones add `blog sync`, `gen` and `linkedin draft` (PLAN.md §6).
 Handlers import their stage modules lazily so `doctor` still runs on a half-installed
 environment — which is exactly when you need it.
 """
 
 import argparse
 import sys
+from pathlib import Path
 
 OK = "[ok]"
 BAD = "[!!]"
@@ -27,6 +29,64 @@ def _force_utf8_stdout() -> None:
                 reconfigure(encoding="utf-8", errors="replace")
             except (ValueError, OSError):
                 pass
+
+
+# ------------------------------------------------------------------ init ----
+
+
+def cmd_init(args: argparse.Namespace) -> int:
+    from .bootstrap import audit, bootstrap
+    from .config import DATA_HOME, settings
+    from .profile import dump_profile
+
+    out_path = Path(args.out) if args.out else settings.PROFILE_PATH
+    if out_path.exists() and not args.force:
+        print(f"{BAD} {out_path} already exists. Re-run with --force to overwrite it.")
+        print(f"{INFO} it is hand-corrected by design - overwriting throws those corrections away.")
+        return 1
+
+    export_dir = Path(args.linkedin_export) if args.linkedin_export else settings.LINKEDIN_EXPORT_DIR
+    resume_path = Path(args.resume_pdf) if args.resume_pdf else _lone_pdf(DATA_HOME)
+
+    print("== resume-fill init ==")
+    if not export_dir.is_dir():
+        print(f"{WARN} no LinkedIn export at {export_dir}")
+        print("     Request one at linkedin.com/mypreferences/d/download-my-data, unpack it there.")
+    if resume_path is None:
+        print(f"{WARN} no résumé PDF given (--resume-pdf) and none found next to the project")
+
+    try:
+        profile, used, notes = bootstrap(export_dir if export_dir.is_dir() else None, resume_path)
+    except RuntimeError as exc:
+        print(f"{BAD} {exc}")
+        return 1
+
+    for line in used:
+        print(f"{OK} read {line}")
+    dump_profile(
+        profile,
+        out_path,
+        note="Seeded by `resume-fill init`. Correct it by hand - every bullet here is\n"
+        "quotable by the tailor, and nothing outside this file (plus the blog evidence\n"
+        "corpus) can appear in a generated résumé.",
+    )
+    print(f"{OK} wrote {out_path}")
+
+    todo = notes + audit(profile)
+    if todo:
+        print(f"\n{INFO} {len(todo)} thing(s) to check before generating anything:")
+        for item in todo:
+            print(f"     - {item}")
+    else:
+        print(f"{OK} nothing obviously missing - still worth reading once")
+    return 0
+
+
+def _lone_pdf(directory: Path) -> Path | None:
+    """Use a PDF sitting next to the project only if there is exactly one; picking between
+    two résumés is not a guess this should make silently."""
+    pdfs = sorted(p for p in directory.glob("*.pdf") if p.is_file())
+    return pdfs[0] if len(pdfs) == 1 else None
 
 
 # ---------------------------------------------------------------- doctor ----
@@ -96,6 +156,13 @@ def build_parser() -> argparse.ArgumentParser:
         description="Job-specific, evidence-grounded résumés and cover letters.",
     )
     sub = parser.add_subparsers(dest="command", required=True)
+
+    p_init = sub.add_parser("init", help="bootstrap profile.yaml from a LinkedIn export + résumé PDF")
+    p_init.add_argument("--linkedin-export", metavar="DIR", help="unpacked LinkedIn data archive")
+    p_init.add_argument("--resume-pdf", metavar="FILE", help="an existing résumé to lift bullets from")
+    p_init.add_argument("--out", metavar="PATH", help="where to write (default: profile.yaml)")
+    p_init.add_argument("--force", action="store_true", help="overwrite an existing profile.yaml")
+    p_init.set_defaults(func=cmd_init)
 
     p_doctor = sub.add_parser("doctor", help="check config, sources and the PDF toolchain")
     p_doctor.set_defaults(func=cmd_doctor)
