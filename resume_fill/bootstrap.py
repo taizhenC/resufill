@@ -79,6 +79,7 @@ def _merge_basics(skeleton: Basics, detail: Basics) -> Basics:
     return Basics(
         name=skeleton.name if not skeleton.name.startswith("TODO") else detail.name,
         headline=skeleton.headline or detail.headline,
+        summary=skeleton.summary or detail.summary,
         email=skeleton.email or detail.email,
         phone=skeleton.phone or detail.phone,
         location=skeleton.location or detail.location,

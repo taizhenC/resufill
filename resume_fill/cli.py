@@ -1,16 +1,18 @@
-"""resume-fill — command surface.
+"""resume-fill — command surface (PLAN.md §6).
 
-    resume-fill init      bootstrap profile.yaml from a LinkedIn export + résumé PDF
-    resume-fill gen       job description -> tailored, grounded, verified résumé PDF
-    resume-fill doctor    check config, sources and the PDF toolchain
+    resume-fill init              bootstrap profile.yaml from a LinkedIn export + résumé PDF
+    resume-fill blog sync         refresh the evidence corpus from BLOG_URL
+    resume-fill gen               job description -> tailored, grounded, verified PDFs
+    resume-fill linkedin draft    proposed profile copy + diff vs current
+    resume-fill doctor            check config, sources and the PDF toolchain
 
-Later milestones add `blog sync` and `linkedin draft` (PLAN.md §6). Handlers import their
-stage modules lazily so `doctor` still runs on a half-installed environment — which is
-exactly when you need it.
+Handlers import their stage modules lazily so `doctor` still runs on a half-installed
+environment — which is exactly when you need it.
 """
 
 import argparse
 import sys
+from datetime import date
 from pathlib import Path
 
 OK = "[ok]"
@@ -88,6 +90,93 @@ def _lone_pdf(directory: Path) -> Path | None:
     two résumés is not a guess this should make silently."""
     pdfs = sorted(p for p in directory.glob("*.pdf") if p.is_file())
     return pdfs[0] if len(pdfs) == 1 else None
+
+
+# ------------------------------------------------------------------ blog ----
+
+
+def cmd_blog_sync(args: argparse.Namespace) -> int:
+    from . import evidence
+    from .config import settings
+    from .ingest import blog
+
+    blog_url = args.url or settings.BLOG_URL
+    if not blog_url:
+        print(f"{BAD} no blog to read. Set BLOG_URL in .env, or pass --url.")
+        return 1
+
+    print("== resume-fill blog sync ==")
+    print(f"{INFO} {blog_url}")
+    fetch = blog.http_fetcher(settings.BLOG_USER_AGENT)
+    try:
+        corpus, note = blog.sync(blog_url, fetch, max_posts=settings.BLOG_MAX_POSTS)
+    except ValueError as exc:
+        print(f"{BAD} {exc}")
+        return 1
+
+    if not corpus.items:
+        print(f"{WARN} nothing found ({note}). The tool works without a blog - the corpus")
+        print("     only ever adds specifics to bullets that profile.yaml already supports.")
+        return 1
+
+    evidence.save(corpus, settings.EVIDENCE_PATH)
+    print(f"{OK} {note}")
+    print(f"{OK} wrote {settings.EVIDENCE_PATH}")
+    for item in corpus.items[:5]:
+        print(f"     {item.id}  {item.title[:60]}")
+    if len(corpus.items) > 5:
+        print(f"     ... and {len(corpus.items) - 5} more")
+    return 0
+
+
+# -------------------------------------------------------------- linkedin ----
+
+
+def cmd_linkedin_draft(args: argparse.Namespace) -> int:
+    from . import evidence, linkedin_draft, llm
+    from .config import settings
+    from .profile import ProfileError, load_profile
+
+    if not settings.llm_configured:
+        print(f"{BAD} {llm.LLMNotConfigured()}")
+        return 1
+    try:
+        profile = load_profile(settings.PROFILE_PATH)
+    except ProfileError as exc:
+        print(f"{BAD} {exc}")
+        return 1
+
+    export_dir = Path(args.export) if args.export else settings.LINKEDIN_EXPORT_DIR
+    corpus = evidence.load(settings.EVIDENCE_PATH)
+
+    print("== resume-fill linkedin draft ==")
+    print(f"{INFO} LinkedIn has no public write API for profile fields, and automating the live")
+    print("     account violates the User Agreement §8.2. This prints copy; you paste it.")
+    if not export_dir.is_dir():
+        print(f"{WARN} no LinkedIn export at {export_dir} - diffing against profile.yaml instead,")
+        print("     which `init` may already have improved on. The diff will understate the change.")
+
+    try:
+        result = linkedin_draft.write(
+            profile, corpus, settings, lambda s, u: llm.complete_json(s, u, cfg=settings),
+            export_dir=export_dir if export_dir.is_dir() else None,
+        )
+    except llm.LLMError as exc:
+        print(f"{BAD} {exc}")
+        return 1
+
+    body = linkedin_draft.render(result, profile)
+    out_path = Path(args.out) if args.out else settings.OUT_DIR / f"linkedin-draft-{date.today()}.md"
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(body, encoding="utf-8")
+
+    print()
+    print(body)
+    print(f"{INFO} written to {out_path}")
+    if not result.ok:
+        print(f"{BAD} the grounding gate rejected the draft - do not paste it as-is")
+        return 1
+    return 0
 
 
 # ------------------------------------------------------------------- gen ----
@@ -297,6 +386,19 @@ def build_parser() -> argparse.ArgumentParser:
     p_init.add_argument("--out", metavar="PATH", help="where to write (default: profile.yaml)")
     p_init.add_argument("--force", action="store_true", help="overwrite an existing profile.yaml")
     p_init.set_defaults(func=cmd_init)
+
+    p_blog = sub.add_parser("blog", help="the blog-derived evidence corpus")
+    blog_sub = p_blog.add_subparsers(dest="blog_command", required=True)
+    p_sync = blog_sub.add_parser("sync", help="refresh data/evidence.json from BLOG_URL")
+    p_sync.add_argument("--url", metavar="URL", help="override BLOG_URL for this run")
+    p_sync.set_defaults(func=cmd_blog_sync)
+
+    p_linkedin = sub.add_parser("linkedin", help="LinkedIn profile copy (draft only - you paste it)")
+    linkedin_sub = p_linkedin.add_subparsers(dest="linkedin_command", required=True)
+    p_draft = linkedin_sub.add_parser("draft", help="proposed headline/About/experience + diff")
+    p_draft.add_argument("--export", metavar="DIR", help="LinkedIn export, to diff against the live copy")
+    p_draft.add_argument("--out", metavar="FILE", help="where to write the draft")
+    p_draft.set_defaults(func=cmd_linkedin_draft)
 
     p_gen = sub.add_parser("gen", help="job description -> tailored, grounded, verified résumé PDF")
     p_gen.add_argument("--jd", required=True, metavar="SOURCE",

@@ -25,7 +25,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from dataclasses import dataclass
 
-from .document import CoverLetter, ResumeDoc
+from .document import CoverLetter, LinkedInDraft, ResumeDoc
 from .lexicon import technical_tokens
 from .profile import Profile
 from .source import SourceIndex, resolve, supporting_text
@@ -223,6 +223,45 @@ def check_letter(
             _claims_against(
                 paragraph.text, supporting_text(index, paragraph.source_ids), declared, where, allowed
             )
+        )
+    return violations
+
+
+def check_linkedin(draft: LinkedInDraft, profile: Profile, index: SourceIndex) -> list[Violation]:
+    """The same gate again, for proposed profile copy.
+
+    A LinkedIn profile is the most-read thing you write and the least reviewed. It is also
+    the one output here that a human pastes somewhere by hand, so a claim that slips
+    through is one nobody will ever check again.
+    """
+    declared = {s.casefold() for s in profile.declared_skills()}
+    known_experience = {e.id for e in profile.experience}
+    violations: list[Violation] = []
+
+    for section in draft.experience:
+        if section.source_id not in known_experience:
+            violations.append(
+                Violation("unknown_entry", f"experience[{section.source_id}]",
+                          "no such role in profile.yaml")
+            )
+
+    for where, paragraph in draft.cited():
+        if not paragraph.text.strip():
+            violations.append(Violation("empty_bullet", where, "is empty"))
+            continue
+        if not paragraph.source_ids:
+            violations.append(
+                Violation("uncited_bullet", where, f'cites nothing: "{truncate(paragraph.text, 70)}"')
+            )
+            continue
+        _, missing = resolve(index, paragraph.source_ids)
+        if missing:
+            violations.append(
+                Violation("unknown_source", where, f"cites unknown id(s): {', '.join(missing)}")
+            )
+            continue
+        violations.extend(
+            _claims_against(paragraph.text, supporting_text(index, paragraph.source_ids), declared, where)
         )
     return violations
 

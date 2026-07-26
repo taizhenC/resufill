@@ -145,6 +145,7 @@ def _basics(export_dir: Path) -> Basics:
     return Basics(
         name=name or "TODO your name",
         headline=get(row, "Headline"),
+        summary=get(row, "Summary"),
         email=email,
         phone=phone,
         location=get(row, "Geo Location", "Location"),

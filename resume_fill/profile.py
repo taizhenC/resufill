@@ -68,6 +68,9 @@ class Link(BaseModel):
 class Basics(BaseModel):
     name: str
     headline: str = ""
+    # The LinkedIn "About" section, seeded from the export's Summary field. Kept so
+    # `linkedin draft` can diff proposed copy against what is actually on the profile.
+    summary: str = ""
     email: str = ""
     phone: str = ""
     location: str = ""

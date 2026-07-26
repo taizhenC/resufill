@@ -105,3 +105,37 @@ class CoverLetter(BaseModel):
 
     def word_count(self) -> int:
         return len(self.body_text().split())
+
+
+class LinkedInSection(BaseModel):
+    """Proposed copy for one profile entry's LinkedIn description."""
+
+    source_id: str
+    paragraphs: list[Paragraph] = Field(default_factory=list)
+
+    def text(self) -> str:
+        return "\n".join(p.text for p in self.paragraphs)
+
+
+class LinkedInDraft(BaseModel):
+    """Proposed profile copy. Never written anywhere by this tool — see linkedin_draft.py.
+
+    Cited like everything else. A LinkedIn profile is the most-read thing you write and the
+    least reviewed, which makes it the worst place to let a claim through unchecked.
+    """
+
+    headline: Paragraph | None = None
+    about: list[Paragraph] = Field(default_factory=list)
+    experience: list[LinkedInSection] = Field(default_factory=list)
+
+    def about_text(self) -> str:
+        return "\n\n".join(p.text for p in self.about)
+
+    def cited(self) -> Iterator[tuple[str, Paragraph]]:
+        if self.headline is not None:
+            yield "headline", self.headline
+        for i, paragraph in enumerate(self.about, start=1):
+            yield f"about.paragraph{i}", paragraph
+        for section in self.experience:
+            for i, paragraph in enumerate(section.paragraphs, start=1):
+                yield f"experience[{section.source_id}].paragraph{i}", paragraph

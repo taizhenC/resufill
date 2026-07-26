@@ -47,6 +47,11 @@ class Settings(BaseSettings):
     BLOG_MAX_POSTS: int = 100
     BLOG_USER_AGENT: str = "resume-fill/0.1 (+personal résumé tooling)"
 
+    # `linkedin draft` shape. LinkedIn truncates the About section at ~2,600 characters and
+    # collapses it after the third line, so the opening paragraph does the work.
+    LINKEDIN_ABOUT_PARAGRAPHS: int = 3
+    LINKEDIN_ABOUT_WORDS: int = 180
+
     # --- Loop -----------------------------------------------------------------
     # The score is a local proxy (PLAN.md §2): no employer computes it. The threshold is
     # a stopping rule for the loop, not a quality bar anyone else will apply.
