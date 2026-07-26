@@ -53,6 +53,14 @@ def test_all_skills_merges_declared_and_per_highlight_skills(example_profile):
     assert "noaa" in skills
 
 
+def test_declared_skills_excludes_per_highlight_tags(example_profile):
+    """The two lists differ on purpose. Only the curated block is assertable anywhere; a
+    tag on one job's highlight is evidence for that highlight, not a global claim."""
+    declared = {s.casefold() for s in example_profile.declared_skills()}
+    assert "python" in declared
+    assert "asyncio" not in declared
+
+
 def test_load_profile_reports_a_missing_file_with_the_fix(tmp_path):
     with pytest.raises(ProfileError, match="resume-fill init"):
         load_profile(tmp_path / "nope.yaml")

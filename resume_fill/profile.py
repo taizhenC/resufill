@@ -165,26 +165,41 @@ class Profile(BaseModel):
     def sorted_projects(self) -> list[Project]:
         return sorted(self.projects, key=_sort_key, reverse=True)
 
-    def all_skills(self) -> list[str]:
-        """Every skill claimed anywhere: the skills block plus per-highlight tags.
-
-        A skill listed here is *assertable* — it may appear in a bullet without the bullet's
-        own cited source having to spell it out. That is the one concession grounding makes,
-        and it is why the skills block has to be curated by hand rather than scraped wide.
-        """
-        out: list[str] = []
-        for group in self.skills.values():
-            out.extend(group)
-        for entry in (*self.experience, *self.education, *self.projects):
-            for highlight in entry.highlights:
-                out.extend(highlight.skills)
+    @staticmethod
+    def _dedupe(skills: list[str]) -> list[str]:
         seen, unique = set(), []
-        for skill in out:
+        for skill in skills:
             key = skill.casefold().strip()
             if key and key not in seen:
                 seen.add(key)
                 unique.append(skill.strip())
         return unique
+
+    def declared_skills(self) -> list[str]:
+        """The curated skills block, flattened.
+
+        A skill listed *here* is assertable anywhere: it may appear in a bullet without the
+        bullet's own cited source spelling it out. That is the one concession the grounding
+        gate makes, which is why this block has to be curated by hand rather than scraped
+        wide — and why per-highlight skill tags deliberately do not get the same licence.
+        A tag on one job's highlight is evidence for that highlight, not a global claim.
+        """
+        return self._dedupe([s for group in self.skills.values() for s in group])
+
+    def all_skills(self) -> list[str]:
+        """Every skill claimed anywhere: the curated block plus per-highlight tags.
+
+        Used for the "may the résumé's skills block list this?" question, where a tool you
+        used on one job counts — and for the tailor's catalogue. Not used for the grounding
+        concession; see declared_skills.
+        """
+        tagged = [
+            skill
+            for entry in (*self.experience, *self.education, *self.projects)
+            for highlight in entry.highlights
+            for skill in highlight.skills
+        ]
+        return self._dedupe(self.declared_skills() + tagged)
 
     # --------------------------------------------------------------- sources --
 
