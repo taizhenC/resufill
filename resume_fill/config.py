@@ -64,6 +64,9 @@ class Settings(BaseSettings):
     COVER_LETTER_FALLBACK_ADDRESSEE: str = "Hiring Manager"
     PAGE_FORMAT: str = "Letter"
     PAGE_MARGIN_IN: float = 0.5
+    # The one honest lever for fitting a page. Below about 9.5pt a résumé stops being
+    # comfortable to read, which is a worse outcome than a second page.
+    FONT_PT: float = 10.5
 
     @property
     def template_dirs(self) -> list[Path]:
