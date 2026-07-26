@@ -17,6 +17,7 @@ import yaml
 from pydantic import BaseModel, Field, ValidationError
 
 from .source import Source, SourceIndex
+from .textutil import truncate
 
 _MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 
@@ -219,7 +220,7 @@ class Profile(BaseModel):
                     id=highlight.id,
                     kind=kind,
                     text=f"{header}\n{highlight.text}",
-                    label=f"{entry.label}: {highlight.text[:60]}",
+                    label=f"{entry.label}: {truncate(highlight.text, 60)}",
                     skills=tuple(highlight.skills),
                 )
                 child_ids.append(highlight.id)

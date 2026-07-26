@@ -64,5 +64,11 @@ def test_supports_number_ignores_thousands_separators_and_trailing_zeros():
 
 
 def test_truncate_marks_that_it_cut():
-    assert truncate("abcdefghij", 5) == "abcd…"
     assert truncate("abc", 5) == "abc"
+    assert truncate("abcdefghij", 5) == "abcd…"  # no word boundary to use
+
+
+def test_truncate_prefers_a_word_boundary():
+    """These end up as citation labels in report.md, where "...single-threaded cro" reads
+    as a bug rather than as a truncation."""
+    assert truncate("Rewrote the single-threaded cron script", 32) == "Rewrote the single-threaded…"

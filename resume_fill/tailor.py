@@ -175,8 +175,18 @@ def tailor(
     )
     data = llm_call(system, user)
     try:
-        return ResumeDoc.model_validate(data)
+        doc = ResumeDoc.model_validate(data)
     except ValidationError as exc:
         # A malformed document is not a grounding failure and cannot be fed back as one —
         # the loop would spend its whole budget re-litigating a JSON shape.
         raise LLMError(f"the model returned a résumé document that does not fit the schema:\n{exc}") from exc
+    if not (doc.experience or doc.projects or doc.education):
+        # Every field on ResumeDoc has a default, so an unrelated JSON object validates
+        # cleanly into an empty document. Without this check a garbage response becomes a
+        # résumé with a name and nothing else, and grounding passes it — there is nothing
+        # in it to be wrong.
+        raise LLMError(
+            "the model returned a résumé with no entries selected. Response keys: "
+            f"{sorted(data)[:10]}"
+        )
+    return doc

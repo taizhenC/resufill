@@ -1,0 +1,149 @@
+"""`report.md` — what the run actually concluded.
+
+The score is printed as a breakdown, never as a bare number, because a bare number invites
+exactly the misreading PLAN.md §2 warns about: no employer computes it. The part worth
+reading is the gap list, split into the two kinds that mean different things — a keyword
+that is in your record but did not get surfaced is a tailoring miss, and a keyword that is
+nowhere in your record is a fact about you.
+"""
+
+from __future__ import annotations
+
+from datetime import date
+
+from .document import ResumeDoc
+from .ground import Violation
+from .jd import JobDescription
+from .profile import Profile
+from .score import Score
+from .source import SourceIndex
+from .verify import VerifyReport
+
+
+def _table(score: Score) -> list[str]:
+    rows = [
+        "| Component | Weight | Score | Points | Why |",
+        "|---|---:|---:|---:|---|",
+    ]
+    for component in score.components:
+        rows.append(
+            f"| {component.label} | {component.weight:.2f} | {component.raw:.0%} | "
+            f"{component.points:.1f} | {component.detail} |"
+        )
+    rows.append(f"| **Total** | | | **{score.total:.1f}** | |")
+    return rows
+
+
+def _citations(doc: ResumeDoc, index: SourceIndex) -> list[str]:
+    """Every bullet with the source it came from.
+
+    This is the receipt. supports_number() accepts a figure whose *unit* differs from the
+    source's wording, which is a deliberate trade — so the source sits next to the claim
+    where it can be checked by eye.
+    """
+    lines = []
+    for where, bullet in doc.bullets():
+        labels = [index[sid].label for sid in bullet.source_ids if sid in index]
+        lines.append(f"- **{where}** — {bullet.text}")
+        lines.append(f"  - source: {'; '.join(labels) or '(none)'}")
+    return lines
+
+
+def build(
+    *,
+    doc: ResumeDoc,
+    profile: Profile,
+    jd: JobDescription,
+    score: Score,
+    index: SourceIndex,
+    verify_report: VerifyReport | None,
+    iterations: int,
+    threshold: float,
+    blocked_terms: list[str],
+    violations: list[Violation],
+) -> str:
+    lines: list[str] = [
+        f"# {jd.title or 'Untitled role'} — {jd.company or 'unknown company'}",
+        "",
+        f"Generated {date.today().isoformat()} by resume-fill. Iterations: {iterations}.",
+        "",
+        "## Score",
+        "",
+        f"**{score.total:.1f} / 100** (threshold {threshold:.0f})",
+        "",
+        "> This number is a **local proxy**. No employer computes it: Greenhouse and Lever do not",
+        "> rank by keyword at all, and Taleo/iCIMS keyword search happens recruiter-side. Treat it",
+        "> as a stopping rule for the rewrite loop, not as a prediction.",
+        "",
+        *_table(score),
+        "",
+    ]
+
+    if verify_report is not None:
+        lines += ["## Parse check", "", f"{verify_report.summary()}", ""]
+        if verify_report.missing:
+            lines += ["Did not survive extraction:", ""]
+            lines += [f"- {item}" for item in verify_report.missing]
+            lines.append("")
+
+    real, unsurfaced = score.real_gaps(), score.unsurfaced()
+    lines += ["## Gaps", ""]
+    if real:
+        lines += [
+            "### Not in your record at all",
+            "",
+            "The posting asks for these and nothing in `profile.yaml` or the evidence corpus",
+            "supports them. They were deliberately left out — this is the honest reading of the",
+            "score's ceiling, and the list is what the role would need you to go and do.",
+            "",
+        ]
+        lines += [f"- {gap.keyword}" for gap in real]
+        lines.append("")
+    if unsurfaced:
+        lines += [
+            "### In your record, but not on this résumé",
+            "",
+            "These you have. They did not make the cut for this posting — either the loop ran out",
+            "of iterations or the page budget did. Worth a look.",
+            "",
+        ]
+        lines += [f"- {gap.keyword} — recorded in: {gap.where}" for gap in unsurfaced]
+        lines.append("")
+    if not real and not unsurfaced:
+        lines += ["Every keyword the posting named appears on the résumé.", ""]
+
+    if score.matched:
+        lines += ["## Matched", "", ", ".join(score.matched), ""]
+
+    if score.unaddressed_qualifications:
+        lines += [
+            "## Qualifications the résumé does not answer",
+            "",
+            *[f"- {q}" for q in score.unaddressed_qualifications],
+            "",
+        ]
+
+    if blocked_terms:
+        lines += [
+            "## Blocked by the grounding gate",
+            "",
+            "The tailor tried to claim these and could not support them from the record. They were",
+            "removed rather than rephrased. If any of them is genuinely true of you, that is a hole",
+            "in `profile.yaml`, not in the résumé.",
+            "",
+            *[f"- {term}" for term in blocked_terms],
+            "",
+        ]
+
+    if violations:
+        lines += [
+            "## Unresolved grounding violations",
+            "",
+            "The loop ended with these outstanding. The PDF was not written.",
+            "",
+            *[f"- [{v.kind}] {v}" for v in violations],
+            "",
+        ]
+
+    lines += ["## Citations", "", *_citations(doc, index), ""]
+    return "\n".join(lines)

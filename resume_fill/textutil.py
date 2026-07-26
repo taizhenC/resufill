@@ -122,5 +122,13 @@ def sentences(text: str) -> list[str]:
 
 
 def truncate(text: str, limit: int) -> str:
+    """Cut on a word boundary where there is one nearby. These strings end up as citation
+    labels in report.md, and "...single-threaded cro" reads as a bug."""
     text = (text or "").strip()
-    return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
+    if len(text) <= limit:
+        return text
+    cut = text[: limit - 1].rstrip()
+    space = cut.rfind(" ")
+    if space > limit * 0.6:
+        cut = cut[:space]
+    return cut.rstrip(" ,;:-") + "…"
