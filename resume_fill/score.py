@@ -1,0 +1,360 @@
+"""The local proxy score, and the gap list that is the actually useful output.
+
+Read PLAN.md §2 before trusting this number. **No employer computes it.** Greenhouse and
+Lever do not rank by keyword at all — they parse a résumé into fields for recruiter search.
+Taleo and iCIMS do keyword search, recruiter-side. Jobscan-style "match scores" are vendor
+heuristics with no standing anywhere. So this is a stopping rule for the auto-iterate loop
+and a way to see what a posting asked for that the record cannot answer. It is not a
+prediction about anything.
+
+Every component is therefore printed as a breakdown with its own explanation, never as a
+bare number, and the weights are the ones written down in PLAN.md §4 rather than tuned
+until the output looked good.
+
+The score is only honest because ground.py exists. A loop optimising keyword coverage has
+one cheap way to raise its number — invent keywords — and the gate is what removes it.
+That makes the ceiling meaningful: a low score means the role genuinely wants things you
+have not done.
+"""
+
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass, field
+
+from .document import ResumeDoc
+from .jd import JobDescription
+from .lexicon import canonical, find_terms
+from .profile import Profile
+from .source import SourceIndex
+from .textutil import contains_term, normalize, words
+from .verify import VerifyReport
+
+# PLAN.md §4. Not tuned.
+WEIGHTS = {
+    "hard_skills": 0.40,
+    "qualifications": 0.15,
+    "title_fit": 0.15,
+    "keywords_in_context": 0.20,
+    "format": 0.10,
+}
+
+# Words that carry no signal when deciding whether a qualification is addressed.
+_STOPWORDS = {
+    "a", "an", "and", "or", "the", "to", "of", "in", "on", "at", "for", "with", "by", "from",
+    "as", "is", "are", "be", "been", "being", "have", "has", "had", "will", "would", "can",
+    "could", "should", "must", "may", "you", "your", "we", "our", "us", "they", "their", "it",
+    "this", "that", "these", "those", "experience", "years", "year", "strong", "excellent",
+    "good", "great", "solid", "ability", "able", "work", "working", "knowledge", "familiar",
+    "familiarity", "understanding", "proficiency", "proficient", "skills", "skill", "plus",
+    "bonus", "nice", "preferred", "required", "requirements", "using", "use", "used", "such",
+    "including", "etc", "other", "others", "well", "least", "more", "most", "some", "any",
+}
+
+
+@dataclass
+class Component:
+    name: str
+    label: str
+    weight: float
+    raw: float  # 0..1
+    detail: str
+
+    @property
+    def points(self) -> float:
+        return self.weight * self.raw * 100
+
+
+@dataclass
+class Gap:
+    """Something the posting asked for that the résumé does not say.
+
+    `in_record` is the distinction that makes the list worth reading: a gap that is
+    somewhere in profile.yaml but was not surfaced is a tailoring miss you can fix by
+    editing the record; a gap that is nowhere in the record is a fact about you, and no
+    amount of rewriting will close it.
+    """
+
+    keyword: str
+    in_record: bool
+    where: str = ""
+
+
+@dataclass
+class Score:
+    components: list[Component] = field(default_factory=list)
+    matched: list[str] = field(default_factory=list)
+    gaps: list[Gap] = field(default_factory=list)
+    stuffed: list[str] = field(default_factory=list)
+    # Kept verbatim rather than only counted: "3 of 11 addressed" tells you nothing about
+    # which three, and the wording of the other eight is the useful part.
+    unaddressed_qualifications: list[str] = field(default_factory=list)
+
+    @property
+    def total(self) -> float:
+        return round(sum(c.points for c in self.components), 1)
+
+    def component(self, name: str) -> Component:
+        return next(c for c in self.components if c.name == name)
+
+    def real_gaps(self) -> list[Gap]:
+        return [g for g in self.gaps if not g.in_record]
+
+    def unsurfaced(self) -> list[Gap]:
+        return [g for g in self.gaps if g.in_record]
+
+
+# ------------------------------------------------------------ components ----
+
+
+def _coverage(terms: list[str], haystack: str) -> tuple[list[str], list[str]]:
+    matched, missing = [], []
+    for term in terms:
+        (matched if contains_term(haystack, term) else missing).append(term)
+    return matched, missing
+
+
+def _content_words(text: str) -> set[str]:
+    return {w for w in words(text) if len(w) > 2 and w not in _STOPWORDS}
+
+
+def addresses(qualification: str, haystack: str) -> bool:
+    """Does the résumé answer this qualification?
+
+    Two ways, because postings write them two ways. A qualification naming concrete
+    technologies is answered by naming them; one written as prose ("comfortable owning a
+    service end to end") is answered by overlapping vocabulary. Neither is precise, which
+    is why the report lists the unaddressed ones verbatim instead of only counting them.
+    """
+    terms = find_terms(qualification)
+    if terms:
+        hits = sum(1 for t in terms if contains_term(haystack, t))
+        return hits * 2 >= len(terms)
+    needed = _content_words(qualification)
+    if not needed:
+        return True
+    present = _content_words(haystack)
+    return len(needed & present) / len(needed) >= 0.4
+
+
+def _hard_skills(jd: JobDescription, haystack: str) -> tuple[Component, list[str], list[str]]:
+    if not jd.hard_skills:
+        return (
+            Component("hard_skills", "Hard-skill coverage vs JD", WEIGHTS["hard_skills"], 1.0,
+                      "the posting names no specific technologies, so there is nothing to cover"),
+            [], [],
+        )
+    matched, missing = _coverage(jd.hard_skills, haystack)
+    raw = len(matched) / len(jd.hard_skills)
+    return (
+        Component("hard_skills", "Hard-skill coverage vs JD", WEIGHTS["hard_skills"], raw,
+                  f"{len(matched)} of {len(jd.hard_skills)} named technologies appear"),
+        matched, missing,
+    )
+
+
+def _qualifications(jd: JobDescription, haystack: str) -> tuple[Component, list[str]]:
+    if not jd.qualifications:
+        return (
+            Component("qualifications", "Required qualifications addressed", WEIGHTS["qualifications"],
+                      1.0, "the posting lists no qualifications"),
+            [],
+        )
+    unaddressed = [q for q in jd.qualifications if not addresses(q, haystack)]
+    raw = 1 - len(unaddressed) / len(jd.qualifications)
+    return (
+        Component("qualifications", "Required qualifications addressed", WEIGHTS["qualifications"],
+                  raw, f"{len(jd.qualifications) - len(unaddressed)} of {len(jd.qualifications)} addressed"),
+        unaddressed,
+    )
+
+
+_SENIORITY_WORDS = {
+    "intern": r"intern|co-?op",
+    "entry": r"intern|junior|associate|assistant|entry",
+    "mid": r"engineer|developer|analyst|scientist|designer",
+    "senior": r"senior|sr\.?|lead|staff|principal",
+    "staff": r"staff|principal|architect|distinguished",
+    "lead": r"lead|manager|head|director|principal",
+}
+
+
+def _title_fit(jd: JobDescription, doc: ResumeDoc, profile: Profile) -> Component:
+    """Two halves: does the résumé speak the posting's vocabulary for the role, and does
+    the level it demonstrates match the level it asks for?"""
+    held_titles = " ".join(
+        e.title for e in profile.experience if e.id in {s.source_id for s in doc.experience}
+    )
+    surface = normalize(" ".join([doc.headline, held_titles, profile.basics.headline]))
+
+    if jd.title:
+        wanted = _content_words(jd.title)
+        overlap = len(wanted & _content_words(surface)) / len(wanted) if wanted else 1.0
+    else:
+        overlap = 1.0
+
+    if not jd.seniority:
+        detail = f"title vocabulary {overlap:.0%} matched; posting states no level"
+        return Component("title_fit", "Title / seniority alignment", WEIGHTS["title_fit"], overlap, detail)
+
+    pattern = _SENIORITY_WORDS.get(jd.seniority, jd.seniority)
+    level = 1.0 if re.search(pattern, surface, re.I) else 0.0
+    detail = (
+        f"title vocabulary {overlap:.0%} matched; "
+        f"{'the record shows' if level else 'nothing in the record shows'} a {jd.seniority}-level role"
+    )
+    return Component("title_fit", "Title / seniority alignment", WEIGHTS["title_fit"],
+                     0.5 * overlap + 0.5 * level, detail)
+
+
+def _keywords_in_context(jd: JobDescription, doc: ResumeDoc) -> tuple[Component, list[str]]:
+    """Coverage measured in the bullets and summary — not the skills list.
+
+    A skills line is free to write and carries no evidence, so counting it here would
+    reward exactly the padding this component exists to discourage. Repetition is
+    penalised for the same reason.
+    """
+    context = "\n".join([doc.summary, doc.bullet_text()])
+    if not jd.keywords:
+        return (
+            Component("keywords_in_context", "Keyword presence in context",
+                      WEIGHTS["keywords_in_context"], 1.0, "no keywords extracted from the posting"),
+            [],
+        )
+    matched, _ = _coverage(jd.keywords, context)
+    coverage = len(matched) / len(jd.keywords)
+
+    bullet_count = max(1, sum(1 for _ in doc.bullets()))
+    stuffing_limit = max(3, round(bullet_count * 0.4))
+    stuffed = [
+        term for term in matched
+        if len(re.findall(rf"(?<![a-z0-9]){re.escape(normalize(term))}(?![a-z0-9])", normalize(context)))
+        > stuffing_limit
+    ]
+    penalty = min(0.5, 0.1 * len(stuffed))
+    detail = f"{len(matched)} of {len(jd.keywords)} keywords appear inside bullets or the summary"
+    if stuffed:
+        detail += f"; {len(stuffed)} repeated more than {stuffing_limit} times (penalised)"
+    return (
+        Component("keywords_in_context", "Keyword presence in context",
+                  WEIGHTS["keywords_in_context"], coverage * (1 - penalty), detail),
+        stuffed,
+    )
+
+
+# Structural checks the document can fail on its own, before anything is rendered.
+MAX_BULLET_CHARS = 240
+
+
+def format_checks(doc: ResumeDoc, profile: Profile, report: VerifyReport | None) -> dict[str, bool]:
+    bullets = [b for _, b in doc.bullets()]
+    checks = {
+        "has an email address": bool(profile.basics.email),
+        "has at least one experience or project entry": bool(doc.experience or doc.projects),
+        "every entry has bullets": all(e.bullets for e in [*doc.experience, *doc.projects, *doc.education]),
+        "no bullet runs past two lines": all(len(b.text) <= MAX_BULLET_CHARS for b in bullets),
+        "uses standard section headings": bool(doc.ordered_sections()),
+    }
+    if report is not None:
+        checks["PDF text extracts cleanly"] = report.ok
+        checks["fits the page budget"] = report.checks.get("page_budget", True)
+    return checks
+
+
+def _format(doc: ResumeDoc, profile: Profile, report: VerifyReport | None) -> Component:
+    checks = format_checks(doc, profile, report)
+    passed = sum(1 for ok in checks.values() if ok)
+    failed = [name for name, ok in checks.items() if not ok]
+    detail = f"{passed} of {len(checks)} checks passed"
+    if failed:
+        detail += "; failed: " + ", ".join(failed)
+    return Component("format", "Format checks passed", WEIGHTS["format"], passed / len(checks), detail)
+
+
+# ----------------------------------------------------------------- gaps ----
+
+
+def classify_gaps(missing: list[str], index: SourceIndex) -> list[Gap]:
+    """Split the misses into "you have this and it did not get surfaced" and "you do not
+    have this". Only the second kind is a fact about you."""
+    gaps = []
+    for term in missing:
+        where = ""
+        for source in index.values():
+            if contains_term(source.text, term) or any(
+                contains_term(skill, term) for skill in source.skills
+            ):
+                where = source.label
+                break
+        gaps.append(Gap(keyword=canonical(term), in_record=bool(where), where=where))
+    return gaps
+
+
+def score(
+    doc: ResumeDoc,
+    profile: Profile,
+    jd: JobDescription,
+    index: SourceIndex,
+    report: VerifyReport | None = None,
+) -> Score:
+    haystack = doc.searchable_text()
+    hard, matched, missing = _hard_skills(jd, haystack)
+    quals, unaddressed = _qualifications(jd, haystack)
+    keywords, stuffed = _keywords_in_context(jd, doc)
+
+    # Keywords the posting wanted that never appear anywhere in the document, whichever
+    # component noticed first.
+    _, missing_keywords = _coverage(jd.keywords, haystack)
+    all_missing = list(dict.fromkeys(missing + missing_keywords))
+
+    return Score(
+        components=[hard, quals, _title_fit(jd, doc, profile), keywords, _format(doc, profile, report)],
+        matched=matched,
+        gaps=classify_gaps(all_missing, index),
+        stuffed=stuffed,
+        unaddressed_qualifications=unaddressed,
+    )
+
+
+# ---------------------------------------------------------- loop feedback ----
+
+
+def feedback(result: Score, threshold: float, report: VerifyReport | None = None) -> str:
+    """What the tailor is told when the draft is honest but does not clear the threshold.
+
+    It is pointed at the gaps that *are* in the record, because those are the only ones a
+    rewrite can close. Naming the others would be an invitation to invent them, and
+    ground.py would reject the result — costing an iteration to learn nothing.
+    """
+    lines = [
+        f"The draft is truthful but scored {result.total:.1f} against a threshold of {threshold:.0f}.",
+        "Improve it WITHOUT adding anything the catalogue does not contain.",
+    ]
+    unsurfaced = result.unsurfaced()
+    if unsurfaced:
+        lines.append("")
+        lines.append("These are in the record but did not make it into the résumé. Surface them by")
+        lines.append("selecting or rewriting the bullets that already contain them:")
+        lines.extend(f"  - {g.keyword} (in: {g.where})" for g in unsurfaced[:15])
+    if result.unaddressed_qualifications:
+        lines.append("")
+        lines.append("Qualifications the draft does not answer:")
+        lines.extend(f"  - {q}" for q in result.unaddressed_qualifications[:10])
+    if result.stuffed:
+        lines.append("")
+        lines.append(
+            "Repeated too often - repetition is penalised, not rewarded: "
+            + ", ".join(result.stuffed)
+        )
+    if report is not None and not report.ok:
+        lines.append("")
+        lines.append("The rendered PDF also failed its checks:")
+        lines.extend(f"  - {item}" for item in report.missing[:10])
+    real = result.real_gaps()
+    if real:
+        lines.append("")
+        lines.append(
+            "Not in the record at all, so LEAVE THEM OUT - they are reported to the "
+            "candidate as genuine gaps: " + ", ".join(g.keyword for g in real[:15])
+        )
+    return "\n".join(lines)

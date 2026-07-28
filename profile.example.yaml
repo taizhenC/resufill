@@ -1,0 +1,103 @@
+# resume-fill profile — the canonical record of a career.
+#
+# This file is the source of truth. Nothing outside it (plus the blog evidence corpus in
+# data/evidence.json) can appear in a generated résumé: ground.py rejects any bullet whose
+# claims it cannot trace back here.
+#
+# Ids matter. Every entry and every highlight has one, and the tailor cites them; they show
+# up in out/<run>/resume.json and in report.md, so keep them readable. Renaming an id is
+# safe — nothing else references it — but do it in one pass.
+#
+# Copy to profile.yaml (which is gitignored, because the real one holds your contact
+# details and employment history) or let `resume-fill init` seed one for you.
+
+basics:
+  name: Ada Lovelace
+  headline: Backend engineer — data pipelines, Python, Postgres
+  email: ada@example.com
+  phone: (555) 010-1990
+  location: Brooklyn, NY
+  links:
+    - label: GitHub
+      url: https://github.com/example
+    - label: LinkedIn
+      url: https://linkedin.com/in/example
+
+experience:
+  - id: exp-northwind-backend
+    company: Northwind Analytics
+    title: Backend Engineer Intern
+    location: New York, NY
+    start: 2025-06      # YYYY-MM. An empty `end` means "present".
+    end: 2025-08
+    summary: Six-person data team; owned the ingestion path end to end.
+    highlights:
+      # Write these the way you would say them out loud, with the real numbers. The tailor
+      # rewrites them for a specific job, but it can only use figures that appear here.
+      - id: exp-northwind-backend.h1
+        text: >-
+          Rewrote the nightly ingestion job from a single-threaded cron script to an
+          asyncio worker pool, cutting the run from 51 minutes to 9.
+        skills: [Python, asyncio, PostgreSQL]
+      - id: exp-northwind-backend.h2
+        text: >-
+          Added contract tests around the 14 upstream feeds, which caught 3 silent schema
+          changes in the first month.
+        skills: [pytest, CI]
+
+  - id: exp-campus-it
+    company: Hunter College IT
+    title: Student Technician
+    location: New York, NY
+    start: 2024-09
+    end: 2025-05
+    highlights:
+      - id: exp-campus-it.h1
+        text: Handled ~40 support tickets a week across Windows and macOS lab machines.
+        skills: [Windows, macOS]
+
+education:
+  - id: edu-hunter-cs
+    institution: Hunter College, CUNY
+    degree: B.A.
+    field_of_study: Computer Science
+    location: New York, NY
+    start: 2023-08
+    end: 2027-05
+    gpa: "3.8/4.0"
+    highlights:
+      - id: edu-hunter-cs.h1
+        text: >-
+          Coursework: Data Structures, Algorithms, Databases, Operating Systems,
+          Computer Networks.
+
+projects:
+  - id: proj-tidepool
+    name: tidepool
+    url: https://github.com/example/tidepool
+    start: 2025-01
+    end: ""
+    summary: A local-first CLI for querying tide tables offline.
+    highlights:
+      - id: proj-tidepool.h1
+        text: >-
+          Packed 40 years of NOAA harmonic constants into a 6 MB SQLite file so lookups
+          work with no network.
+        skills: [Python, SQLite, NOAA]
+
+# Categories are free-form and drive the order of the résumé's skills block. A skill listed
+# here may be named in a bullet without that bullet's own source spelling it out — it is the
+# one concession the grounding gate makes, so keep this list to things you would defend in
+# an interview.
+skills:
+  Languages: [Python, SQL, TypeScript, C++]
+  Frameworks: [FastAPI, pytest, React]
+  Data: [PostgreSQL, SQLite, pandas]
+  Tools: [Git, Docker, Linux, GitHub Actions]
+
+certifications:
+  - id: cert-aws-cloud-practitioner
+    name: AWS Certified Cloud Practitioner
+    issuer: Amazon Web Services
+    date: 2025-03
+    url: ""

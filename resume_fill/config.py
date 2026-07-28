@@ -47,6 +47,11 @@ class Settings(BaseSettings):
     BLOG_MAX_POSTS: int = 100
     BLOG_USER_AGENT: str = "resume-fill/0.1 (+personal résumé tooling)"
 
+    # `linkedin draft` shape. LinkedIn truncates the About section at ~2,600 characters and
+    # collapses it after the third line, so the opening paragraph does the work.
+    LINKEDIN_ABOUT_PARAGRAPHS: int = 3
+    LINKEDIN_ABOUT_WORDS: int = 180
+
     # --- Loop -----------------------------------------------------------------
     # The score is a local proxy (PLAN.md §2): no employer computes it. The threshold is
     # a stopping rule for the loop, not a quality bar anyone else will apply.
@@ -58,12 +63,17 @@ class Settings(BaseSettings):
 
     # --- Document shape -------------------------------------------------------
     RESUME_MAX_PAGES: int = 1
+    # A cover letter that runs to two pages does not get read; the budget is the point.
+    COVER_LETTER_MAX_PAGES: int = 1
     COVER_LETTER_WORDS: int = 300
     COVER_LETTER_TONE: str = "direct and specific; no filler, no flattery, no restating the job ad"
     # Used when the posting names no addressee (PLAN.md open question 4).
     COVER_LETTER_FALLBACK_ADDRESSEE: str = "Hiring Manager"
     PAGE_FORMAT: str = "Letter"
     PAGE_MARGIN_IN: float = 0.5
+    # The one honest lever for fitting a page. Below about 9.5pt a résumé stops being
+    # comfortable to read, which is a worse outcome than a second page.
+    FONT_PT: float = 10.5
 
     @property
     def template_dirs(self) -> list[Path]:

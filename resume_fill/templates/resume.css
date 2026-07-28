@@ -1,0 +1,122 @@
+/* ATS-safe by construction.
+ *
+ * Every rule here is chosen for what happens when the PDF's text layer is read back, not
+ * for what the page looks like. The constraint was measured, not assumed: rendering a
+ * two-column entry header through flexbox and extracting the text puts the right-hand
+ * column *after* the bullets, so the dates arrive detached from the job they describe.
+ *
+ * Therefore, and without exception:
+ *   - one column, no flex, no grid, no float, no absolute positioning;
+ *   - no tables, no text boxes, no images, no icons;
+ *   - dates live inline in the same run of text as the employer;
+ *   - real text in a common font, never outlines or a webfont that might not embed.
+ *
+ * verify.py extracts the text back out of every PDF this produces and fails the build if
+ * the contact block, a heading or a bullet did not survive. These rules are what makes
+ * that assertion pass.
+ */
+
+@page {
+  size: {{ page_format }};
+  margin: {{ margin_in }}in;
+}
+
+html {
+  font-size: {{ font_pt }}pt;
+}
+
+body {
+  /* A stack of fonts Chromium can always resolve locally. A webfont that fails to load
+     silently substitutes, and one that loads may subset in ways that hurt extraction. */
+  font-family: "Helvetica Neue", Helvetica, Arial, "Liberation Sans", sans-serif;
+  color: #000;
+  line-height: 1.32;
+  margin: 0;
+  /* Justification inserts wide inter-word gaps that some extractors read as column
+     breaks. Ragged right costs nothing and removes the risk. */
+  text-align: left;
+}
+
+header {
+  margin-bottom: 0.55em;
+}
+
+h1 {
+  font-size: 1.65rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  margin: 0 0 0.15em;
+}
+
+.headline {
+  font-size: 1rem;
+  margin: 0 0 0.2em;
+}
+
+.contact {
+  font-size: 0.94rem;
+  margin: 0;
+}
+
+h2 {
+  font-size: 1rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  border-bottom: 0.75pt solid #000;
+  margin: 0.85em 0 0.3em;
+  padding-bottom: 0.1em;
+}
+
+section {
+  /* Keep an entry with its heading where the page allows it; never at the cost of
+     dropping content. */
+  break-inside: auto;
+}
+
+.entry {
+  margin-bottom: 0.5em;
+  break-inside: avoid;
+}
+
+/* The entry header is one line of running text: employer, then role, then place and dates.
+   Separated by a pipe so the pieces stay distinguishable to a parser without any layout. */
+.entry-head {
+  margin: 0;
+}
+
+.entry-head .primary {
+  font-weight: 700;
+}
+
+.entry-head .secondary {
+  font-style: italic;
+}
+
+.entry-head .sep {
+  padding: 0 0.25em;
+}
+
+ul {
+  margin: 0.12em 0 0;
+  padding-left: 1.05em;
+}
+
+li {
+  margin: 0.08em 0;
+}
+
+.summary,
+.skill-line,
+.list-item {
+  margin: 0.1em 0;
+}
+
+.skill-label {
+  font-weight: 700;
+}
+
+a {
+  color: #000;
+  text-decoration: none;
+}

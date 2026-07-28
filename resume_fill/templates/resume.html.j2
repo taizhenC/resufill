@@ -1,0 +1,62 @@
+{#
+  Deliberately dumb. render.py resolves every value — company names, titles and dates come
+  from profile.yaml by id, never from the model — so this file only decides order and tags.
+
+  The CSS is inlined rather than linked because the page is loaded via set_content() with
+  no base URL, so a <link> would silently resolve to nothing and the PDF would render
+  unstyled. Chromium is also strict about print styles here: see render.py.
+#}
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>{{ name }} — résumé</title>
+<style>{{ css }}</style>
+</head>
+<body>
+
+<header>
+  <h1>{{ name }}</h1>
+  {% if headline %}<p class="headline">{{ headline }}</p>{% endif %}
+  {% if contact %}<p class="contact">{{ contact }}</p>{% endif %}
+</header>
+
+{% for section in sections %}
+<section>
+  <h2>{{ section.title }}</h2>
+
+  {% if section.kind == 'summary' %}
+  <p class="summary">{{ section.text }}</p>
+
+  {% elif section.kind == 'skills' %}
+    {% for label, items in section.groups %}
+  <p class="skill-line"><span class="skill-label">{{ label }}:</span> {{ items }}</p>
+    {% endfor %}
+
+  {% elif section.kind == 'entries' %}
+    {% for entry in section.entries %}
+  <div class="entry">
+    {# One line of running text. No columns: a two-column header reorders in the text
+       layer, which is how dates end up attached to the wrong job. #}
+    <p class="entry-head">
+      <span class="primary">{{ entry.primary }}</span>
+      {%- for part in entry.parts %}<span class="sep">|</span>{% if part.italic %}<span class="secondary">{{ part.text }}</span>{% else %}<span>{{ part.text }}</span>{% endif %}{% endfor %}
+    </p>
+    {% if entry.bullets %}
+    <ul>
+      {% for bullet in entry.bullets %}<li>{{ bullet }}</li>{% endfor %}
+    </ul>
+    {% endif %}
+  </div>
+    {% endfor %}
+
+  {% elif section.kind == 'list' %}
+    {% for item in section.items %}
+  <p class="list-item">{{ item }}</p>
+    {% endfor %}
+  {% endif %}
+</section>
+{% endfor %}
+
+</body>
+</html>
