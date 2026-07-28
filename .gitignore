@@ -1,0 +1,18 @@
+# Secrets and the canonical career record. profile.yaml holds full contact details and
+# employment history (PLAN.md open question 6, resolved: gitignore it, ship the example).
+.env
+/profile.yaml
+/profile.*.yaml
+!/profile.example.yaml
+
+# Generated: every run's PDFs, intermediates and reports (open question 8: keep, never commit).
+/out/
+# Blog-derived evidence cache and the unpacked LinkedIn archive — both derived, both PII.
+/data/
+
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.ruff_cache/
+dist/

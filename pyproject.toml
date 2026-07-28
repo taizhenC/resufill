@@ -1,0 +1,46 @@
+[project]
+name = "resume-fill"
+version = "0.1.0"
+description = "Turn a canonical career record into a job-specific, grounded, ATS-parseable résumé and cover letter"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+dependencies = [
+    "openai>=1.40",
+    "pydantic>=2.7",
+    "pydantic-settings>=2.3",
+    "pyyaml>=6.0",
+    "jinja2>=3.1",
+    "playwright>=1.45",
+    "pdfminer.six>=20231228",
+    "httpx>=0.27",
+    "platformdirs>=4",
+]
+
+[project.scripts]
+resume-fill = "resume_fill.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["resume_fill"]
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "ruff>=0.6",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+# E501: prompt strings and lexicon tables read worse when hard-wrapped at 110.
+ignore = ["E501"]
