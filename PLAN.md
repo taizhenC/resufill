@@ -3,7 +3,9 @@
 A local CLI that turns a canonical record of your career into a job-specific résumé and cover
 letter, and drafts LinkedIn profile copy from your blog.
 
-Status: **design agreed, not yet implemented.** Produced from a `/grill-me` session on 2026-07-25.
+Status: **implemented, M0–M6.** Design produced from a `/grill-me` session on 2026-07-25; built
+2026-07-26. Every open question in §9 is now answered — see that section for what was decided and
+why. §10 records what the build itself turned up.
 
 ---
 
@@ -130,6 +132,17 @@ resume-fill/
     └── linkedin_draft.py     # blog → proposed profile copy + diff
 ```
 
+Built as planned, plus five modules the plan implied but did not name:
+
+| Module | Why it exists |
+|---|---|
+| `source.py` | The `Source` type and parent/child containment. Citing a job licenses that job's own highlights and nothing from another employer |
+| `textutil.py` | One matcher. `ground`, `score` and `verify` all ask "does this string say that thing?" and must agree, or a bullet passes grounding and fails scoring on the same words |
+| `lexicon.py` | What counts as a *claim*. "Improved throughput" is prose; "with Kafka" is checkable |
+| `document.py` | `resume.json`, the cover letter and the LinkedIn draft, so `ground.py` can gate all three without importing the stages that produce them |
+| `pipeline.py` | The loop, and `run()` for the three modes |
+| `bootstrap.py`, `evidence.py`, `cover.py` | The `init` merge, the corpus reader, and the letter |
+
 ## 6. CLI surface
 
 ```bash
@@ -141,7 +154,12 @@ resume-fill gen --jd jd.txt --cover       # mode 2: cover letter only
 resume-fill gen --jd jd.txt --both        # mode 3: both  (default)
 
 resume-fill linkedin draft                # proposed headline/About/bullets + diff vs current
+resume-fill doctor                        # config, sources and the PDF toolchain
 ```
+
+`--jd` takes a file path, an `https` URL, or `-` for stdin. `gen` also accepts `--out`,
+`--max-iter`, `--threshold`, `--pages` and `--strict`; every one of them defaults to the
+corresponding `.env` setting.
 
 ## 7. Config (`.env`)
 
@@ -172,20 +190,41 @@ MAX_ITER=4
 M1–M4 are the tool. M5 is cheap once M2–M3 exist. M6 is the part you described first but depends on
 everything else, so it lands last.
 
+**All six are done**, one branch and one PR each, in that order. M5 was cheap exactly as
+predicted. The estimate that was wrong was M1: seeding a profile from a résumé PDF is where most of
+the heuristics live, because a PDF's text layer is not its layout.
+
 ---
 
-## 9. Open questions
+## 9. Open questions — resolved
 
-Not yet decided — the grilling session stopped here.
+The grilling session stopped at these. Each was decided during the build, in the milestone that
+first needed it.
 
-1. **Blog URL.** Blocking all of M6. Once known, ingestion mechanics (RSS vs sitemap vs HTML scrape,
-   date/tag extraction) get determined by inspection rather than by asking.
-2. **JD input method.** File path, stdin paste, or scrape from a posting URL?
-3. **Résumé length.** Hard one-page cap, or allow two pages when the evidence justifies it?
-4. **Cover letter parameters.** Target length, tone, and what to do when the addressee is unknown.
-5. **Loop tuning.** Confirm `SCORE_THRESHOLD=80` and `MAX_ITER=4`, and decide what happens when the
-   ceiling is honest-but-low — fail, or emit with a warning?
-6. **`profile.yaml` and git.** It holds full contact details and employment history. Commit it, or
-   gitignore it and keep only `profile.example.yaml`?
-7. **Profile variants.** One `profile.yaml`, or separate emphases (e.g. SWE vs ML) selected per run?
-8. **Output retention.** Keep every run in `out/` forever, or prune?
+| # | Question | Decision | Why |
+|---|---|---|---|
+| 1 | **Blog URL** — blocking all of M6 | Not needed. `BLOG_URL` is config; ingestion autodetects | A blog only tells you which mechanism it supports by responding. `blog.discover()` tries a declared `<link rel=alternate>` feed, then conventional feed paths, then `sitemap.xml`, then landing-page links, and reports which route fired |
+| 2 | **JD input** — file, stdin, or URL | All three | One function each. Picking one would have been the only wrong answer |
+| 3 | **Résumé length** | `RESUME_MAX_PAGES=1`, configurable, `--pages` per run | Overflow is a named format failure fed back to the tailor, so the loop shortens rather than the user re-running. `FONT_PT` is the other lever; below ~9.5pt a second page is the better trade |
+| 4 | **Cover letter parameters** | `COVER_LETTER_WORDS=300`, tone in config, addressee falls back to "Hiring Manager" | Nothing in a posting reliably names an addressee, and scraping a name off a company page is how a letter ends up addressed to someone who left. A convention beats a fake personalisation |
+| 5 | **Loop tuning, and an honest-but-low ceiling** | `SCORE_THRESHOLD=80`, `MAX_ITER=4` kept. Below threshold **emits with a warning**; `STRICT_SCORE` / `--strict` makes it fail | The gate is what stopped the loop inflating the number, so a low ceiling is the *answer*, and `report.md` names the experience the role wants that you do not have. A failed **parse** check is always fatal — that is the one guarantee the tool makes |
+| 6 | **`profile.yaml` and git** | Gitignored; `profile.example.yaml` is committed | It holds full contact details and employment history. The example doubles as the test fixture, which keeps it honest |
+| 7 | **Profile variants** | Not built. `PROFILE_PATH` already points anywhere, and `profile.*.yaml` is gitignored | `PROFILE_PATH=profile.ml.yaml resume-fill gen ...` covers it with no new concept. A `--variant` flag would be a second way to say the same thing |
+| 8 | **Output retention** | Keep everything; `out/` is gitignored | Runs are cheap, named `<company>-<role>-<date>`, and keeping `resume.json` is what makes two runs diffable. Nothing prunes on your behalf |
+
+---
+
+## 10. What the build turned up
+
+Facts discovered by writing it, not by planning it. Each one changed the code.
+
+| Finding | Consequence |
+|---|---|
+| **Chromium's flexbox reorders the PDF text layer.** A two-column entry header (`justify-content: space-between`) extracts with the right-hand column *after* the bullets — verified by rendering one and reading it back. A Word résumé with a right tab stop does the same. | The rendered résumé is strictly single column, dates inline. `resume_pdf.py` also had to learn to reattach an orphaned date line, since real résumés arrive this way |
+| **Jinja autoescape silently breaks an inlined stylesheet.** `font-family: "Helvetica Neue"` becomes `&#34;Helvetica Neue&#34;`, which Chromium discards as invalid and falls back to serif — no error anywhere. | The stylesheet is wrapped in `Markup` at the single point it enters the context. Found by looking at the rendered page, not by a test failing |
+| **Squashing punctuation out of both sides of a term match is far too eager.** `.NET` squashes to `net`, which is inside `Kub‑e‑r‑net‑es`. | `contains_term` builds separator-tolerant patterns from the term's *own* alphanumeric runs instead, and asserts boundaries only on edges that are alphanumeric (`C++` ends on punctuation, `.NET` starts on it) |
+| **Every field on `ResumeDoc` has a default**, so an unrelated JSON object validated into an empty document — and grounding *passed* it, because there was nothing in it to be wrong. | `tailor()` rejects a document with no entries selected |
+| **A skill tagged on one job's highlight is not a global claim.** Treating `profile.all_skills()` as the grounding allowance let a bullet about one job claim a tool tagged only on another. | `declared_skills()` (the curated block, assertable anywhere) is now distinct from `all_skills()` (everything, used for the skills-block subset check) |
+| **A CamelCase company name is indistinguishable from a CamelCase product name.** | The cover letter passes an allowlist derived from the posting's own title and company; otherwise applying to DeepMind fails every draft |
+| **A blog paragraph can be short and still be the best evidence you have.** A chunk-length minimum discarded "the old job took 51 minutes on a good night". | Filtering is per paragraph by word count, which drops navigation without touching prose |
+| **PDF list markers are drawn, not written into the text layer.** | The résumé-PDF seeder classifies bullets by line length once the glyph is gone |
