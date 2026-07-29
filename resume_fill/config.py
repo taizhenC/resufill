@@ -69,6 +69,14 @@ class Settings(BaseSettings):
     COVER_LETTER_TONE: str = "direct and specific; no filler, no flattery, no restating the job ad"
     # Used when the posting names no addressee (PLAN.md open question 4).
     COVER_LETTER_FALLBACK_ADDRESSEE: str = "Hiring Manager"
+    # --- Local web UI (`resume-fill serve`) -----------------------------------
+    HOST: str = "127.0.0.1"
+    PORT: int = 8765
+    # Required before binding anything but loopback. This server reads profile.yaml and
+    # spends the configured API key on request, so exposing it without one is not a
+    # configuration choice — see main.check_bind_security.
+    AUTH_TOKEN: str = ""
+
     PAGE_FORMAT: str = "Letter"
     PAGE_MARGIN_IN: float = 0.5
     # The one honest lever for fitting a page. Below about 9.5pt a résumé stops being
