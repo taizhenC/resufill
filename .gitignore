@@ -10,6 +10,11 @@
 # Blog-derived evidence cache and the unpacked LinkedIn archive — both derived, both PII.
 /data/
 
+# Built web UI (vite output). Gitignored, but re-included in the wheel — see the
+# `artifacts` key in pyproject.toml, which exists precisely to ship VCS-ignored files.
+/resume_fill/webui/
+/frontend/node_modules/
+
 __pycache__/
 *.pyc
 .venv/
