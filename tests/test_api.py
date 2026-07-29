@@ -280,3 +280,16 @@ def test_the_index_says_how_to_build_the_ui_when_it_is_missing(client, monkeypat
     response = client.get("/")
     assert response.status_code == 503
     assert "npm run build" in response.json()["detail"]
+
+
+def test_the_built_index_is_served_when_it_exists(client, monkeypatch, tmp_path):
+    from resume_fill import main
+
+    built = tmp_path / "webui"
+    built.mkdir()
+    (built / "index.html").write_text("<!doctype html><title>resume-fill</title>", encoding="utf-8")
+
+    monkeypatch.setattr(main, "WEBUI_DIR", built)
+    response = client.get("/")
+    assert response.status_code == 200
+    assert "resume-fill" in response.text
