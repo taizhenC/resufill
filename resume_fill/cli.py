@@ -4,6 +4,7 @@
     resume-fill blog sync         refresh the evidence corpus from BLOG_URL
     resume-fill gen               job description -> tailored, grounded, verified PDFs
     resume-fill linkedin draft    proposed profile copy + diff vs current
+    resume-fill serve             the same generate loop, in a browser
     resume-fill doctor            check config, sources and the PDF toolchain
 
 Handlers import their stage modules lazily so `doctor` still runs on a half-installed
@@ -347,57 +348,64 @@ def _report_resume(result, cfg) -> int:
 
 
 def cmd_doctor(args: argparse.Namespace) -> int:
+    from . import doctor
     from .config import DATA_HOME, settings
 
-    problems = 0
     print("== resume-fill doctor ==")
     print(f"   data home: {DATA_HOME}")
+    # Deep: actually launch Chromium. The API's preflight settles for checking the
+    # executable exists, because it runs on every page load; this runs when you asked.
+    report = doctor.run_checks(settings, deep=True)
 
-    if settings.llm_configured:
-        print(f"{OK} LLM configured: {settings.LLM_MODEL} @ {settings.LLM_BASE_URL}")
-    else:
-        problems += 1
-        print(f"{BAD} LLM not configured - copy .env.example to .env and set LLM_API_KEY/BASE_URL/MODEL")
+    for check in report.checks:
+        mark = OK if check.ok else (BAD if check.blocking else WARN)
+        print(f"{mark} {check.name}: {check.detail}")
+        if not check.ok and check.fix:
+            print(f"     fix: {check.fix}")
 
-    if settings.PROFILE_PATH.exists():
-        print(f"{OK} profile: {settings.PROFILE_PATH}")
-    else:
-        print(f"{WARN} no profile yet at {settings.PROFILE_PATH} - run `resume-fill init`")
-
-    if settings.EVIDENCE_PATH.exists():
-        print(f"{OK} evidence corpus: {settings.EVIDENCE_PATH}")
-    else:
-        print(f"{WARN} no evidence corpus - run `resume-fill blog sync` (needs BLOG_URL)")
-
-    problems += _check_pdf_toolchain()
     print()
-    print(f"{OK} no blocking problems" if not problems else f"{BAD} {problems} blocking problem(s)")
-    return 1 if problems else 0
+    if report.ok:
+        print(f"{OK} no blocking problems")
+        return 0
+    print(f"{BAD} {len(report.problems)} blocking problem(s)")
+    return 1
 
 
-def _check_pdf_toolchain() -> int:
-    """Playwright's bundled Chromium is the whole PDF story — this machine has no Word,
-    LibreOffice, pandoc, Typst or LaTeX (PLAN.md §2), so a missing browser is fatal."""
-    try:
-        from playwright.sync_api import sync_playwright
-    except ImportError:
-        print(f"{BAD} playwright not installed - run `uv sync`")
-        return 1
-    try:
-        with sync_playwright() as p:
-            browser = p.chromium.launch()
-            browser.close()
-    except Exception as exc:
-        print(f"{BAD} Chromium not usable ({type(exc).__name__}) - run `uv run playwright install chromium`")
-        return 1
-    print(f"{OK} Playwright Chromium available (PDF renderer)")
+# ----------------------------------------------------------------- serve ----
 
+
+def cmd_serve(args: argparse.Namespace) -> int:
+    import webbrowser
+
+    from .config import settings
+    from .main import WEBUI_DIR, app, check_bind_security
+
+    host = args.host or settings.HOST
+    port = args.port or settings.PORT
     try:
-        import pdfminer  # noqa: F401
-    except ImportError:
-        print(f"{BAD} pdfminer.six not installed - run `uv sync`")
+        check_bind_security(host, settings.AUTH_TOKEN)
+    except RuntimeError as exc:
+        print(f"{BAD} {exc}")
         return 1
-    print(f"{OK} pdfminer.six available (PDF round-trip verifier)")
+
+    # The middleware reads settings.HOST to decide whether the bind is local, so a --host
+    # override has to land there too or the guard would be checking the wrong address.
+    settings.HOST = host
+
+    url = f"http://{'127.0.0.1' if host in ('0.0.0.0', '::') else host}:{port}/"
+    print("== resume-fill serve ==")
+    print(f"{INFO} {url}")
+    if not (WEBUI_DIR / "index.html").exists():
+        print(f"{WARN} web UI not built - run `npm ci && npm run build` in frontend/")
+        print(f"     ({WEBUI_DIR} is gitignored on purpose; the JSON API works regardless)")
+    if not args.no_open:
+        webbrowser.open(url)
+
+    import uvicorn
+
+    # The app object rather than an import string: uvicorn would otherwise re-import the
+    # module and get a fresh settings instance that never saw the --host override.
+    uvicorn.run(app, host=host, port=port, log_level="warning")
     return 0
 
 
@@ -445,6 +453,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_gen.add_argument("--strict", action="store_true",
                        help="fail the run when the score stays below the threshold")
     p_gen.set_defaults(func=cmd_gen)
+
+    p_serve = sub.add_parser("serve", help="run the local web UI")
+    p_serve.add_argument("--host", metavar="ADDR", help=f"bind address (default: {'127.0.0.1'})")
+    p_serve.add_argument("--port", type=int, metavar="N", help="port (default: 8765)")
+    p_serve.add_argument("--no-open", action="store_true", help="do not open a browser")
+    p_serve.set_defaults(func=cmd_serve)
 
     p_doctor = sub.add_parser("doctor", help="check config, sources and the PDF toolchain")
     p_doctor.set_defaults(func=cmd_doctor)
