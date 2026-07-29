@@ -154,7 +154,6 @@ resume-fill gen --jd jd.txt --cover       # mode 2: cover letter only
 resume-fill gen --jd jd.txt --both        # mode 3: both  (default)
 
 resume-fill linkedin draft                # proposed headline/About/bullets + diff vs current
-resume-fill serve                         # the same generate loop, in a browser
 resume-fill doctor                        # config, sources and the PDF toolchain
 ```
 
@@ -229,31 +228,3 @@ Facts discovered by writing it, not by planning it. Each one changed the code.
 | **A CamelCase company name is indistinguishable from a CamelCase product name.** | The cover letter passes an allowlist derived from the posting's own title and company; otherwise applying to DeepMind fails every draft |
 | **A blog paragraph can be short and still be the best evidence you have.** A chunk-length minimum discarded "the old job took 51 minutes on a good night". | Filtering is per paragraph by word count, which drops navigation without touching prose |
 | **PDF list markers are drawn, not written into the text layer.** | The résumé-PDF seeder classifies bullets by line length once the glyph is gone |
-
----
-
-## 11. The web UI (W0–W3)
-
-Added after the CLI was finished, from a second grilling session on 2026-07-28. Decisions:
-
-| Decision | Chosen | Why |
-|---|---|---|
-| Deployment | **localhost only** | `profile.yaml` is full PII and every run spends your API key. Hosting it would mean accounts, other people's PII, and deciding who pays for the model |
-| Scope | **the generate loop** | It is the thing you repeat. `init` runs once and exists to produce a file you correct in an editor |
-| Stack | Preact + Vite + TS, Vite building into `resume_fill/webui` | Matches infinance; hatch `artifacts` ships the gitignored build output in the wheel |
-| State | `out/` stays the only truth; each run also writes **`run.json`** | No database. `report.md` is prose for a person and must not become a parsing target |
-| Progress | **stage-level**, polled ~1s | A run is 10–60s of silence per stage. Fine on a terminal, looks crashed in a browser |
-| Concurrency | one at a time, 409 on a second | A `threading.Lock`. Chromium plus an LLM, on a laptop |
-| JD input | **paste only** | No upload endpoint means no multipart, no PDF sniffing, no server-side fetch of a URL somebody typed |
-| Cancel | cooperative, checked at stage boundaries | Killing the thread mid-render leaves a half-written PDF nothing can tell is corrupt |
-| Binding | loopback; `AUTH_TOKEN` required for anything else | Copied from infinance. The failure mode is silent and the blast radius is your employment history |
-
-**A thread, not an async task.** `render.py` uses Playwright's *sync* API, which raises inside a
-running asyncio event loop. A `threading.Thread` has none — so the pipeline runs there unmodified,
-and the lock is a `threading.Lock`. It has its own named test, because it would otherwise fail with
-an unrelated-looking error.
-
-**Cited source text is embedded in `run.json`, not referenced.** A citation is a receipt for a claim
-on a document you may already have sent. Closing a gap means editing `profile.yaml`; if the audit
-re-read the record it would silently start showing a source that no longer says what it said. It
-would render, it would be wrong, and nothing would say so.

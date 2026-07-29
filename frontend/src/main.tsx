@@ -1,11 +1,8 @@
 import { render } from "preact";
 
 import { DoctorBanner } from "./components/Banners";
-import { History } from "./components/History";
-import { refreshHistory, resumeIfRunning, showRun } from "./run";
 import { refreshDoctor } from "./state";
 import { GenerateForm } from "./views/Generate";
-import { RunView } from "./views/Run";
 import "./styles.css";
 
 function App() {
@@ -20,8 +17,7 @@ function App() {
 
       <main>
         <DoctorBanner />
-        {showRun.value ? <RunView /> : <GenerateForm />}
-        <History />
+        <GenerateForm />
       </main>
 
       <footer class="footer">
@@ -32,8 +28,4 @@ function App() {
 }
 
 void refreshDoctor();
-void refreshHistory();
-// A page reload during a run should resume watching it rather than pretend it is not there.
-void resumeIfRunning();
-
 render(<App />, document.getElementById("app")!);
