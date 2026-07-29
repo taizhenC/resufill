@@ -15,9 +15,6 @@ dependencies = [
     "pdfminer.six>=20231228",
     "httpx>=0.27",
     "platformdirs>=4",
-    # Local web UI. uvicorn only ever serves 127.0.0.1 unless AUTH_TOKEN is set.
-    "fastapi>=0.115",
-    "uvicorn[standard]>=0.30",
 ]
 
 [project.scripts]
