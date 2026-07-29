@@ -203,6 +203,158 @@ def test_an_honest_ceiling_below_the_threshold_still_produces_a_pdf(example_prof
     assert "local proxy" in report  # the number is never presented bare
 
 
+# ------------------------------------------------- run.json, stages, cancel ----
+
+
+@needs_chromium
+def test_a_run_writes_a_structured_record_beside_the_report(example_profile, tmp_path):
+    """report.md is prose for a person. Re-deriving a score by parsing it would make a
+    human-readable artefact into a parsing target."""
+    from resume_fill import runrecord
+    from resume_fill.pipeline import run
+
+    out = tmp_path / "run"
+    result = run(example_profile, POSTING, None, _cfg(tmp_path), _scripted(HONEST),
+                 out_dir=out, mode="resume")
+
+    assert result.record_path == out / "run.json"
+    record = runrecord.load(out)
+    assert record.mode == "resume"
+    assert record.ok is True
+    assert record.cancelled is False
+    assert record.jd.company == "Northwind"
+    assert record.score.total == HONEST_CEILING
+    assert record.settings["model"]
+
+    doc = record.document("resume")
+    assert doc.pdf == "resume.pdf"
+    assert doc.iterations >= 1
+    assert doc.verify.ok is True
+    # Every bullet carries its source text, not just the id.
+    assert doc.claims and all(c.sources for c in doc.claims)
+    assert "asyncio worker pool" in doc.claims[0].sources[0].text
+
+
+# Defined here rather than imported from test_cover, which already imports POSTING from
+# this module — the other direction would be a cycle.
+LETTER = {
+    "addressee": "Hiring Manager",
+    "subject": "Re: Backend Engineer, Data Platform at Northwind",
+    "paragraphs": [
+        {
+            "text": "I rewrote a nightly ingestion job as an asyncio worker pool and cut the run "
+            "from 51 minutes to 9.",
+            "source_ids": ["exp-northwind-backend.h1"],
+        }
+    ],
+}
+
+
+@needs_chromium
+def test_both_documents_appear_in_one_record(example_profile, tmp_path):
+    from resume_fill import runrecord
+    from resume_fill.pipeline import run
+
+    out = tmp_path / "run"
+
+    def call(system, user):
+        return LETTER if "Write a cover letter" in user else HONEST
+
+    run(example_profile, POSTING, None, _cfg(tmp_path), call, out_dir=out, mode="both")
+    record = runrecord.load(out)
+    assert [d.kind for d in record.documents] == ["resume", "cover_letter"]
+    assert record.document("cover_letter").claims
+    assert record.document("cover_letter").pdf == "cover_letter.pdf"
+
+
+@needs_chromium
+def test_stages_are_reported_in_order(example_profile, tmp_path):
+    """The CLI used to print one line per attempt, which meant up to a minute of silence
+    between them. These are the moments the pipeline is between two blocking calls."""
+    from resume_fill.pipeline import run
+    from resume_fill.progress import Progress
+
+    seen: list[str] = []
+    progress = Progress(sink=lambda stage, detail: seen.append(stage))
+    run(example_profile, POSTING, None, _cfg(tmp_path, SCORE_THRESHOLD=1), _scripted(HONEST),
+        out_dir=tmp_path / "run", mode="resume", progress=progress)
+
+    assert seen[:6] == ["tailoring", "grounding", "rendering", "verifying", "scoring", "scored"]
+    assert seen[-2:] == ["writing_report", "done"]
+
+
+@needs_chromium
+def test_a_rejected_attempt_reports_why_and_skips_rendering(example_profile, tmp_path):
+    from resume_fill.pipeline import run
+    from resume_fill.progress import Progress
+
+    events: list[tuple[str, dict]] = []
+    progress = Progress(sink=lambda stage, detail: events.append((stage, detail)))
+    run(example_profile, POSTING, None, _cfg(tmp_path, MAX_ITER=1), _scripted(FABRICATED),
+        out_dir=tmp_path / "run", mode="resume", progress=progress)
+
+    stages = [s for s, _ in events]
+    assert "rejected" in stages
+    assert "rendering" not in stages  # never render claims that are about to be rejected
+    reason = next(d["reason"] for s, d in events if s == "rejected")
+    assert "unsupported_term" in reason
+
+
+@needs_chromium
+def test_cancelling_between_stages_stops_the_run_and_keeps_what_finished(example_profile, tmp_path):
+    """Cooperative on purpose: killing the thread mid-render would leave a half-written PDF
+    that nothing can tell is corrupt."""
+    import threading
+
+    from resume_fill import runrecord
+    from resume_fill.pipeline import run
+    from resume_fill.progress import Progress
+
+    event = threading.Event()
+    # Let the first attempt complete, then ask to stop before the second one starts.
+    def sink(stage: str, detail: dict) -> None:
+        if stage == "scored":
+            event.set()
+
+    out = tmp_path / "run"
+    result = run(
+        example_profile, POSTING, None, _cfg(tmp_path, SCORE_THRESHOLD=99, MAX_ITER=4),
+        _scripted(HONEST), out_dir=out, mode="resume",
+        progress=Progress(sink=sink, cancel=event),
+    )
+
+    assert result.cancelled is True
+    assert result.ok is False
+    assert len(result.resume.attempts) == 1  # stopped instead of using all four
+    # The report and the record are still written; the run happened, it just stopped early.
+    assert (out / "report.md").exists()
+    record = runrecord.load(out)
+    assert record.cancelled is True
+    assert record.document("resume").pdf == "resume.pdf"
+
+
+@needs_chromium
+def test_cancelling_before_anything_finishes_still_records_the_run(example_profile, tmp_path):
+    import threading
+
+    from resume_fill import runrecord
+    from resume_fill.pipeline import run
+    from resume_fill.progress import Progress
+
+    event = threading.Event()
+    event.set()  # cancelled before the first stage even reports
+
+    out = tmp_path / "run"
+    result = run(example_profile, POSTING, None, _cfg(tmp_path), _scripted(HONEST),
+                 out_dir=out, mode="resume", progress=Progress(cancel=event))
+
+    assert result.cancelled is True
+    assert result.resume is None
+    assert not (out / "resume.pdf").exists()
+    record = runrecord.load(out)
+    assert record.cancelled is True and record.documents == []
+
+
 def test_the_run_directory_names_the_company_the_role_and_the_date(tmp_path):
     from datetime import date
 
