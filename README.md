@@ -43,6 +43,29 @@ cat posting.txt | resume-fill gen --jd -
 resume-fill linkedin draft --export data/linkedin_export
 ```
 
+## Or in a browser
+
+```bash
+cd frontend && npm ci && npm run build && cd ..
+resume-fill serve
+```
+
+Opens `http://127.0.0.1:8765`. Same pipeline, same `out/` directory, same `profile.yaml` — the
+server is a thin JSON API over the library the CLI already uses, so a run started in either
+place is indistinguishable afterwards.
+
+It covers the generate loop only: paste a posting, pick a mode, watch each stage as it happens,
+then read the score breakdown and gap list with the PDFs rendered inline. `init`, `blog sync` and
+`linkedin draft` stay on the command line — they run once, and `init` exists to produce a file you
+then correct by hand in an editor.
+
+The one thing the browser does that a terminal cannot: **audit the résumé claim by claim**. Every
+bullet expands to the source text that licensed it, snapshotted at generation time, so editing
+`profile.yaml` later cannot quietly change what a résumé you already sent appears to stand on.
+
+It binds to loopback and refuses to start on any other address unless `AUTH_TOKEN` is set — this
+server reads your contact details and employment history, and every run spends your API key.
+
 Output lands in `out/<company>-<role>-<date>/`:
 
 | File | What it is |
