@@ -1,6 +1,7 @@
 import { computed, signal } from "@preact/signals";
 
 import { api, ApiError } from "./api";
+import { watch } from "./run";
 import type { DoctorReport, Mode, RunRequest } from "./types";
 
 export const doctorReport = signal<DoctorReport | null>(null);
@@ -67,6 +68,9 @@ export async function startRun(): Promise<void> {
   try {
     const snapshot = await api.start(runRequest());
     activeRunId.value = snapshot.run_id || null;
+    // Hand straight to the poller: the run id is not known until the JD has been parsed,
+    // so the first snapshot is mostly empty and the live view fills in from there.
+    watch(snapshot);
   } catch (error) {
     submitError.value =
       error instanceof ApiError
