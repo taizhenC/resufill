@@ -25,7 +25,7 @@ from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
 
-from . import ground
+from . import ground, runrecord
 from . import report as report_module
 from . import score as score_module
 from .config import Settings
@@ -34,6 +34,20 @@ from .evidence import Corpus
 from .jd import JobDescription
 from .llm import LLMCall
 from .profile import Profile
+from .progress import (
+    CANCELLED,
+    DONE,
+    GROUNDING,
+    REJECTED,
+    RENDERING,
+    SCORED,
+    SCORING,
+    TAILORING,
+    VERIFYING,
+    WRITING_REPORT,
+    Cancelled,
+    Progress,
+)
 from .render import Rendered, render_cover_letter, render_resume
 from .score import Score
 from .source import SourceIndex
@@ -83,6 +97,7 @@ class RunResult:
     report_path: Path
     blocked_terms: list[str]
     threshold: float
+    cancelled: bool = False
 
     @property
     def ok(self) -> bool:
@@ -116,41 +131,62 @@ def generate(
     llm_call: LLMCall,
     *,
     out_dir: Path,
-    on_progress=None,
+    progress: Progress | None = None,
     write_report: bool = True,
 ) -> RunResult:
     from .tailor import tailor
 
     index = source_index(profile, corpus)
+    report = progress or Progress()
 
     attempts: list[Attempt] = []
     blocked: list[str] = []
     feedback = ""
+    cancelled = False
     out_dir.mkdir(parents=True, exist_ok=True)
+    total = max(1, cfg.MAX_ITER)
 
-    for number in range(1, max(1, cfg.MAX_ITER) + 1):
-        doc = tailor(
-            profile, jd, corpus, llm_call, max_pages=cfg.RESUME_MAX_PAGES, feedback=feedback
-        )
-        attempt = Attempt(number=number, doc=doc)
-        attempt.violations = ground.check(doc, profile, index)
-        attempts.append(attempt)
+    for number in range(1, total + 1):
+        where = {"document": "resume", "attempt": number, "attempts": total}
+        try:
+            report(TAILORING, **where)
+            doc = tailor(
+                profile, jd, corpus, llm_call, max_pages=cfg.RESUME_MAX_PAGES, feedback=feedback
+            )
+            attempt = Attempt(number=number, doc=doc)
 
-        if attempt.violations:
-            blocked = list(dict.fromkeys(blocked + ground.unsupported_terms(attempt.violations)))
-            feedback = ground.feedback(attempt.violations)
-            if on_progress:
-                on_progress(attempt)
-            continue
+            report(GROUNDING, **where)
+            attempt.violations = ground.check(doc, profile, index)
+            attempts.append(attempt)
 
-        attempt.rendered = render_resume(doc, profile, out_dir, cfg)
-        attempt.verify_report = verify(
-            attempt.rendered.pdf_path, doc, profile,
-            max_pages=cfg.RESUME_MAX_PAGES, page_count=attempt.rendered.page_count,
-        )
-        attempt.score = score_module.score(doc, profile, jd, index, attempt.verify_report)
-        if on_progress:
-            on_progress(attempt)
+            if attempt.violations:
+                blocked = list(dict.fromkeys(blocked + ground.unsupported_terms(attempt.violations)))
+                feedback = ground.feedback(attempt.violations)
+                report(REJECTED, **where, reason=ground.summarize(attempt.violations))
+                continue
+
+            report(RENDERING, **where)
+            attempt.rendered = render_resume(doc, profile, out_dir, cfg)
+
+            report(VERIFYING, **where)
+            attempt.verify_report = verify(
+                attempt.rendered.pdf_path, doc, profile,
+                max_pages=cfg.RESUME_MAX_PAGES, page_count=attempt.rendered.page_count,
+            )
+
+            report(SCORING, **where)
+            attempt.score = score_module.score(doc, profile, jd, index, attempt.verify_report)
+            report(
+                SCORED, **where, score=attempt.score.total,
+                parses=attempt.verify_report.ok, pages=attempt.verify_report.page_count,
+            )
+        except Cancelled:
+            cancelled = True
+            # Nothing finished, so there is no partial result worth describing. Let run()
+            # record a cancelled run rather than inventing an empty one here.
+            if not attempts:
+                raise
+            break
 
         if attempt.verify_report.ok and attempt.score.total >= cfg.SCORE_THRESHOLD:
             break
@@ -172,7 +208,7 @@ def generate(
     )
     result = RunResult(
         out_dir=out_dir, attempts=attempts, best=best, report_path=out_dir / "report.md",
-        blocked_terms=blocked, threshold=cfg.SCORE_THRESHOLD,
+        blocked_terms=blocked, threshold=cfg.SCORE_THRESHOLD, cancelled=cancelled,
     )
     if write_report:
         # `run()` writes a combined report when a cover letter is in play, so it asks for
@@ -224,6 +260,7 @@ class CoverRun:
     attempts: list[CoverAttempt]
     best: CoverAttempt
     blocked_terms: list[str]
+    cancelled: bool = False
 
     @property
     def ok(self) -> bool:
@@ -238,38 +275,56 @@ def generate_cover(
     llm_call: LLMCall,
     *,
     out_dir: Path,
-    on_progress=None,
+    progress: Progress | None = None,
 ) -> CoverRun:
     """Grounding-only loop. There is no score for a cover letter and inventing one would
     be inventing a metric — the résumé's proxy is already an explicitly-labelled proxy."""
     from . import cover
 
     index = source_index(profile, corpus)
+    report = progress or Progress()
     allowed = cover.allowed_terms(jd)
     attempts: list[CoverAttempt] = []
     blocked: list[str] = []
     feedback = ""
+    cancelled = False
     out_dir.mkdir(parents=True, exist_ok=True)
+    total = max(1, cfg.MAX_ITER)
 
-    for number in range(1, max(1, cfg.MAX_ITER) + 1):
-        letter = cover.write(profile, jd, corpus, cfg, llm_call, feedback=feedback)
-        attempt = CoverAttempt(number=number, letter=letter)
-        attempt.violations = ground.check_letter(letter, profile, index, allowed_terms=allowed)
-        attempts.append(attempt)
-        if attempt.violations:
-            blocked = list(dict.fromkeys(blocked + ground.unsupported_terms(attempt.violations)))
-            feedback = ground.feedback(attempt.violations)
-            if on_progress:
-                on_progress(attempt)
-            continue
+    for number in range(1, total + 1):
+        where = {"document": "cover_letter", "attempt": number, "attempts": total}
+        try:
+            report(TAILORING, **where)
+            letter = cover.write(profile, jd, corpus, cfg, llm_call, feedback=feedback)
+            attempt = CoverAttempt(number=number, letter=letter)
 
-        attempt.rendered = render_cover_letter(letter, profile, out_dir, cfg)
-        attempt.verify_report = verify_letter(
-            attempt.rendered.pdf_path, letter, profile,
-            max_pages=cfg.COVER_LETTER_MAX_PAGES, page_count=attempt.rendered.page_count,
-        )
-        if on_progress:
-            on_progress(attempt)
+            report(GROUNDING, **where)
+            attempt.violations = ground.check_letter(letter, profile, index, allowed_terms=allowed)
+            attempts.append(attempt)
+            if attempt.violations:
+                blocked = list(dict.fromkeys(blocked + ground.unsupported_terms(attempt.violations)))
+                feedback = ground.feedback(attempt.violations)
+                report(REJECTED, **where, reason=ground.summarize(attempt.violations))
+                continue
+
+            report(RENDERING, **where)
+            attempt.rendered = render_cover_letter(letter, profile, out_dir, cfg)
+
+            report(VERIFYING, **where)
+            attempt.verify_report = verify_letter(
+                attempt.rendered.pdf_path, letter, profile,
+                max_pages=cfg.COVER_LETTER_MAX_PAGES, page_count=attempt.rendered.page_count,
+            )
+            report(
+                SCORED, **where, parses=attempt.verify_report.ok,
+                pages=attempt.verify_report.page_count, words=letter.word_count(),
+            )
+        except Cancelled:
+            cancelled = True
+            if not attempts:
+                raise
+            break
+
         if attempt.verify_report.ok:
             break
         feedback = "The rendered PDF failed its checks:\n" + "\n".join(
@@ -286,7 +341,7 @@ def generate_cover(
     (out_dir / "cover_letter.json").write_text(
         json.dumps(best.letter.model_dump(), indent=2, ensure_ascii=False), encoding="utf-8"
     )
-    return CoverRun(attempts=attempts, best=best, blocked_terms=blocked)
+    return CoverRun(attempts=attempts, best=best, blocked_terms=blocked, cancelled=cancelled)
 
 
 # ------------------------------------------------------------------ run ----
@@ -303,10 +358,13 @@ class Run:
     report_path: Path
     resume: RunResult | None = None
     cover: CoverRun | None = None
+    cancelled: bool = False
+    record_path: Path | None = None
 
     @property
     def ok(self) -> bool:
-        return all(part.ok for part in (self.resume, self.cover) if part is not None)
+        parts = [p for p in (self.resume, self.cover) if p is not None]
+        return bool(parts) and not self.cancelled and all(p.ok for p in parts)
 
 
 def run(
@@ -318,26 +376,44 @@ def run(
     *,
     out_dir: Path,
     mode: str = "both",
-    on_progress=None,
+    progress: Progress | None = None,
 ) -> Run:
     if mode not in MODES:
         raise ValueError(f"mode must be one of {MODES}, got {mode!r}")
     index = source_index(profile, corpus)
     out_dir.mkdir(parents=True, exist_ok=True)
     report_path = out_dir / "report.md"
+    cancelled = False
 
     resume_result = None
     if mode in ("resume", "both"):
-        resume_result = generate(
-            profile, jd, corpus, cfg, llm_call,
-            out_dir=out_dir, on_progress=on_progress, write_report=False,
-        )
+        try:
+            resume_result = generate(
+                profile, jd, corpus, cfg, llm_call,
+                out_dir=out_dir, progress=progress, write_report=False,
+            )
+            cancelled = resume_result.cancelled
+        except Cancelled:
+            # Cancelled before the first attempt produced anything. There is no partial
+            # résumé to describe, but the run still gets a record saying what happened.
+            cancelled = True
 
     cover_result = None
-    if mode in ("cover", "both"):
-        cover_result = generate_cover(
-            profile, jd, corpus, cfg, llm_call, out_dir=out_dir, on_progress=on_progress
-        )
+    if mode in ("cover", "both") and not cancelled:
+        try:
+            cover_result = generate_cover(
+                profile, jd, corpus, cfg, llm_call, out_dir=out_dir, progress=progress
+            )
+            cancelled = cover_result.cancelled
+        except Cancelled:
+            cancelled = True
+
+    if progress is not None:
+        # Deliberately not through progress(): the report and the record still get written
+        # for a cancelled run, and a checkpoint here would abort exactly that.
+        progress.history.append((WRITING_REPORT, {}))
+        if progress.sink:
+            progress.sink(WRITING_REPORT, {})
 
     sections = []
     if resume_result is not None:
@@ -346,7 +422,73 @@ def run(
         sections.append(report_module.cover_section(cover_result, jd, index))
     report_path.write_text("\n".join(sections), encoding="utf-8")
 
-    return Run(
+    result = Run(
         out_dir=out_dir, mode=mode, report_path=report_path,
-        resume=resume_result, cover=cover_result,
+        resume=resume_result, cover=cover_result, cancelled=cancelled,
+    )
+    result.record_path = runrecord.save(
+        build_record(result, jd, index, cfg), out_dir
+    )
+    if progress is not None:
+        stage = CANCELLED if cancelled else DONE
+        progress.history.append((stage, {"ok": result.ok}))
+        if progress.sink:
+            progress.sink(stage, {"ok": result.ok})
+    return result
+
+
+def build_record(
+    result: Run, jd: JobDescription, index: SourceIndex, cfg: Settings
+) -> runrecord.RunRecord:
+    """The structured account of the run, for anything that is not a human reading prose."""
+    documents: list[runrecord.DocumentRecord] = []
+
+    if result.resume is not None:
+        best = result.resume.best
+        documents.append(
+            runrecord.DocumentRecord(
+                kind="resume",
+                pdf=best.rendered.pdf_path.name if best.rendered else "",
+                ok=result.resume.ok,
+                iterations=len(result.resume.attempts),
+                verify=runrecord.verify_record(best.verify_report),
+                claims=runrecord.resume_claims(best.doc, index),
+                blocked_terms=list(result.resume.blocked_terms),
+                violations=[str(v) for v in best.violations],
+            )
+        )
+    if result.cover is not None:
+        best_cover = result.cover.best
+        documents.append(
+            runrecord.DocumentRecord(
+                kind="cover_letter",
+                pdf=best_cover.rendered.pdf_path.name if best_cover.rendered else "",
+                ok=result.cover.ok,
+                iterations=len(result.cover.attempts),
+                verify=runrecord.verify_record(best_cover.verify_report),
+                claims=runrecord.cover_claims(best_cover.letter, index),
+                blocked_terms=list(result.cover.blocked_terms),
+                violations=[str(v) for v in best_cover.violations],
+            )
+        )
+
+    return runrecord.RunRecord(
+        run_id=result.out_dir.name,
+        created_at=runrecord.now(),
+        mode=result.mode,
+        ok=result.ok,
+        cancelled=result.cancelled,
+        jd=runrecord.job_record(jd),
+        settings={
+            "threshold": cfg.SCORE_THRESHOLD,
+            "max_iter": cfg.MAX_ITER,
+            "resume_max_pages": cfg.RESUME_MAX_PAGES,
+            "cover_letter_words": cfg.COVER_LETTER_WORDS,
+            "strict_score": cfg.STRICT_SCORE,
+            "model": cfg.LLM_MODEL,
+        },
+        score=runrecord.score_record(
+            result.resume.best.score if result.resume else None, cfg.SCORE_THRESHOLD
+        ),
+        documents=documents,
     )

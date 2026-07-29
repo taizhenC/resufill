@@ -188,6 +188,7 @@ def cmd_gen(args: argparse.Namespace) -> int:
     from .config import settings
     from .pipeline import run, run_dir
     from .profile import ProfileError, load_profile
+    from .progress import Progress
     from .render import RenderError
 
     cfg = settings.model_copy(
@@ -230,14 +231,11 @@ def cmd_gen(args: argparse.Namespace) -> int:
     print(f"{INFO} mode:    {mode}")
     print(f"{INFO} output:  {out_dir}")
 
-    def progress(attempt) -> None:
-        print(f"  [{attempt.number}/{cfg.MAX_ITER}] {attempt.note()}")
-
     try:
         result = run(
             profile, job, corpus, cfg,
             lambda s, u: llm.complete_json(s, u, cfg=cfg),
-            out_dir=out_dir, mode=mode, on_progress=progress,
+            out_dir=out_dir, mode=mode, progress=Progress(sink=_stage_line),
         )
     except (llm.LLMError, RenderError) as exc:
         print(f"{BAD} {exc}")
@@ -250,7 +248,40 @@ def cmd_gen(args: argparse.Namespace) -> int:
     if result.cover is not None:
         code |= _report_cover(result.cover)
     print(f"{INFO} report: {result.report_path}")
+    if result.record_path:
+        print(f"{INFO} record: {result.record_path}")
+    if result.cancelled:
+        print(f"{WARN} the run was cancelled; what completed before then was kept")
+        return 1
     return 1 if code else 0
+
+
+_STAGE_LABEL = {
+    "tailoring": "writing",
+    "grounding": "checking every claim",
+    "rejected": "rejected",
+    "rendering": "rendering PDF",
+    "verifying": "reading the PDF back",
+    "scoring": "scoring",
+    "scored": "done",
+    "writing_report": "writing the report",
+    "done": "finished",
+    "cancelled": "cancelled",
+}
+
+
+def _stage_line(stage: str, detail: dict) -> None:
+    """One line per stage. The CLI used to print a line per *attempt*, which meant up to a
+    minute of silence between them — fine on a terminal, and the reason the UI needed this
+    to exist at all."""
+    label = _STAGE_LABEL.get(stage, stage)
+    where = ""
+    if "attempt" in detail:
+        doc = "résumé" if detail.get("document") == "resume" else "cover letter"
+        where = f"[{doc} {detail['attempt']}/{detail['attempts']}] "
+    extra = {k: v for k, v in detail.items() if k not in ("document", "attempt", "attempts")}
+    tail = "  " + ", ".join(f"{k} {v}" for k, v in extra.items()) if extra else ""
+    print(f"  {where}{label}{tail}", flush=True)
 
 
 def _report_cover(cover_run) -> int:
