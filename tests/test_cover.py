@@ -17,7 +17,6 @@ CFG = Settings()
 
 LETTER = {
     "addressee": "Hiring Manager",
-    "subject": "Re: Backend Engineer, Data Platform at Northwind",
     "paragraphs": [
         {
             "text": "I rewrote a nightly ingestion job as an asyncio worker pool and cut the run "
@@ -109,11 +108,10 @@ def test_the_prompt_states_the_rule_that_separates_enthusiasm_from_a_claim(examp
     assert CFG.COVER_LETTER_TONE in user
 
 
-def test_write_fills_in_the_addressee_and_subject_the_model_left_out(example_profile):
+def test_write_fills_in_the_addressee_the_model_left_out(example_profile):
     letter = write(example_profile, POSTING, None, CFG,
                    lambda s, u: {"paragraphs": [{"text": "x", "source_ids": []}]})
     assert letter.addressee == "Hiring Manager"
-    assert letter.subject.startswith("Re: Backend Engineer, Data Platform")
 
 
 def test_write_rejects_a_letter_of_the_wrong_shape(example_profile):

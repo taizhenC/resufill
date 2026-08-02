@@ -231,7 +231,6 @@ def render_cover_html(
         name=profile.basics.name,
         contact=profile.basics.contact_line(),
         date=(today or date.today()).strftime("%d %B %Y"),
-        subject=letter.subject,
         addressee=letter.addressee or cfg.COVER_LETTER_FALLBACK_ADDRESSEE,
         paragraphs=[p.text for p in letter.paragraphs],
         signoff=letter.signoff or "Sincerely,",

@@ -239,7 +239,6 @@ def test_a_run_writes_a_structured_record_beside_the_report(example_profile, tmp
 # this module — the other direction would be a cycle.
 LETTER = {
     "addressee": "Hiring Manager",
-    "subject": "Re: Backend Engineer, Data Platform at Northwind",
     "paragraphs": [
         {
             "text": "I rewrote a nightly ingestion job as an asyncio worker pool and cut the run "
