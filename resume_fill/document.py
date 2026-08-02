@@ -92,7 +92,6 @@ class CoverLetter(BaseModel):
     """
 
     addressee: str = ""
-    subject: str = ""
     paragraphs: list[Paragraph] = Field(default_factory=list)
     signoff: str = "Sincerely,"
 

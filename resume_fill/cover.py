@@ -37,7 +37,6 @@ Return only JSON."""
 
 _SCHEMA = """{
   "addressee": "who it is addressed to",
-  "subject": "Re: <role> at <company>",
   "paragraphs": [{"text": "...", "source_ids": ["exp-....h1"]}],
   "signoff": "Sincerely,"
 }"""
@@ -55,8 +54,9 @@ Company: {company}
 === RULES ===
 1. {paragraph_count} paragraphs, about {words} words in total. Shorter is better than padded.
 2. Every paragraph lists the source ids behind it. Cite the narrowest id that supports it.
-3. Open by naming the role and the single most relevant thing in the record. Do not open
-   with "I am writing to apply for" — the subject line already says that.
+3. Open by naming the role you are applying for and the single most relevant thing in the
+   record. The letter has no subject line, so this opening is what tells the reader which
+   job it is about. Do not waste it on "I am writing to apply for".
 4. The middle paragraph(s) answer this posting's requirements with specific, cited work.
 5. Numbers: only figures that appear in the cited source. Technologies: only ones named in
    the cited source or in DECLARED SKILLS.
@@ -142,6 +142,4 @@ def write(
         raise LLMError(f"the model returned a cover letter that does not fit the schema:\n{exc}") from exc
     if not letter.addressee.strip():
         letter.addressee = addressee_for(jd, cfg)
-    if not letter.subject.strip() and jd.title:
-        letter.subject = f"Re: {jd.title}" + (f" at {jd.company}" if jd.company else "")
     return letter
