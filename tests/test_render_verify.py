@@ -64,10 +64,9 @@ def test_facts_come_from_the_profile_not_the_document(example_profile):
     context = build_context(_doc(), example_profile, CFG)
     experience = next(s for s in context["sections"] if s["title"] == "Experience")
     entry = experience["entries"][0]
-    assert entry["primary"] == "Northwind Analytics"
-    assert [p["text"] for p in entry["parts"]] == [
-        "Backend Engineer Intern", "New York, NY", "Jun 2025 – Aug 2025"
-    ]
+    assert entry["primary"] == "Backend Engineer Intern"
+    assert entry["secondary"] == "Northwind Analytics - New York, NY"
+    assert entry["dates"] == "Jun 2025 – Aug 2025"
 
 
 def test_empty_sections_are_dropped_not_rendered_blank(example_profile):
@@ -160,12 +159,13 @@ def test_every_bullet_and_heading_survives_the_pdf(example_profile, tmp_path):
 
 @needs_chromium
 def test_the_dates_stay_attached_to_their_own_job(example_profile, tmp_path):
-    """The failure the layout rules exist to prevent: in the extracted text, the employer,
-    the title and the dates must still be adjacent."""
+    """The failure the layout rules exist to prevent: in the extracted text, the title, the
+    dates and the employer must still be adjacent and in that order. Every way of floating
+    the dates to the right margin breaks this — see the header of resume.css."""
     doc = _doc()
     rendered = render_resume(doc, example_profile, tmp_path, CFG)
     text = flatten(verify(rendered.pdf_path, doc, example_profile).text)
-    assert "northwind analytics | backend engineer intern | new york, ny | jun 2025 - aug 2025" in text
+    assert "backend engineer intern | jun 2025 - aug 2025 northwind analytics - new york, ny" in text
 
 
 @needs_chromium

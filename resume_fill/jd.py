@@ -221,13 +221,91 @@ Return JSON with exactly these keys:
   "hard_skills": concrete technologies, tools, languages and named methods the posting asks for
   "qualifications": the required and preferred qualifications, one short phrase each
   "responsibilities": what the person will actually do, one short phrase each
-  "keywords": the terms a recruiter would search this posting by (max 25)
+  "keywords": skills, technologies, methods and qualifications a *candidate* could
+              possess and could evidence on a résumé (max 25)
+
+For "keywords", the test is whether a person can truthfully claim it about themselves. \
+"PostgreSQL", "distributed systems", "code review" pass. Never include the hiring company, \
+a location, a work arrangement, a perk or anything the employer is offering, or the job's \
+own title or category — nobody can put "hybrid", "NYC", "internship" or "mentorship" in a \
+bullet, so listing them only makes the candidate look short of things they were never able \
+to have.
 
 Keep every item short. Do not add anything the posting does not say.
 
 --- POSTING ---
 {posting}
 --- END POSTING ---"""
+
+
+# Terms that describe the job, the employer or the deal on offer rather than the person
+# applying. A résumé cannot contain any of them, so scoring their absence measures nothing
+# and reporting it as a gap tells the candidate to go and acquire "hybrid" and "NYC".
+_NOT_A_CANDIDATE_TRAIT = re.compile(
+    r"\b("
+    r"intern|internship|entry[ -]?level|new ?grad|graduate ?scheme|apprentice(ship)?|"
+    r"junior|senior|staff|principal|lead|"
+    r"full[ -]?time|part[ -]?time|contract|temporary|permanent|freelance|"
+    r"hybrid|remote|on[ -]?site|in[ -]?office|onsite|relocation|visa|sponsorship|"
+    r"salary|compensation|equity|benefits|bonus|stipend|paid|unpaid|perks?|401k|"
+    r"mentorship|mentoring|cohort|programme?|opportunity|culture|mission|"
+    r"headquarters|office|team of|we offer|you will receive|competitive"
+    r")\b",
+    re.I,
+)
+
+# Dispositions and qualification prose. A recruiter searches "PostgreSQL", never "eagerness
+# to learn", and no bullet can contain "ability to commit six months" — so these score the
+# same as the perks above: unearnable, and useless printed back as a gap.
+_NOT_A_SEARCH_TERM = re.compile(
+    r"\b("
+    r"ability|abilities|willingness|eagerness|desire|passion(ate)?|enthusias\w*|motivat\w*|"
+    r"attitude|mindset|responsiveness|adaptab\w*|self[ -]starter|team ?player|"
+    r"attention to|understanding of|knowledge of|familiarity with|exposure to|"
+    r"experience|background|proficien\w*|comfortable|willing|eager|"
+    r"strong|excellent|solid|proven|demonstrated|working knowledge|"
+    r"communication skills|interpersonal|soft skills"
+    r")\b",
+    re.I,
+)
+
+
+def candidate_terms(terms: list[str], jd: JobDescription) -> list[str]:
+    """Keep only the terms a person could truthfully claim about themselves.
+
+    The scorer weights keyword coverage at 0.20 and the report prints whatever is missing as
+    a gap. Both are worse than useless when the list contains the company's own name, the
+    city, or the word "internship": the coverage component becomes unearnable no matter how
+    good the résumé is, and the gap list reads as a lecture about things that were never the
+    candidate's to have. Filtering here fixes both at once, because both read this list.
+    """
+    company = (jd.company or "").casefold().strip()
+    title = (jd.title or "").casefold().strip()
+    kept = []
+    for term in terms:
+        name = term.strip()
+        low = name.casefold()
+        if not name or _NOT_A_CANDIDATE_TRAIT.search(name) or _NOT_A_SEARCH_TERM.search(name):
+            continue
+        # Real terms are short. "distributed systems", "human-robot interaction" and
+        # "reciprocal-rank fusion" all fit in three words; a longer one is a sentence the
+        # extractor failed to break down, and nobody puts a sentence in a search box.
+        if len(name.split()) > 3:
+            continue
+        # Gating multi-word terms on the lexicon was tried here and removed: it does drop the
+        # model's coinages ("codebase contribution", "feedback handling"), but it also drops
+        # "version control", "sprint planning" and "data platform", which are real things to
+        # put on a résumé. Losing those costs more than the noise is worth.
+        # The employer's name, and the posting's own title read back at it.
+        if company and (low == company or low in company or company in low):
+            continue
+        # Only the whole title echoed back. A *fragment* of it is usually a real domain term
+        # — "Backend Engineer, Data Platform" gives up "data platform", which a candidate can
+        # both have worked on and put in a bullet.
+        if title and low == title:
+            continue
+        kept.append(name)
+    return kept
 
 
 def _merge_terms(primary: list[str], extra: list[str]) -> list[str]:
@@ -273,7 +351,10 @@ def enrich(jd: JobDescription, llm_call: LLMCall, *, max_chars: int = 12000) -> 
     jd.hard_skills = _merge_terms(jd.hard_skills, as_list("hard_skills"))
     jd.qualifications = _merge_phrases(jd.qualifications, as_list("qualifications"))
     jd.responsibilities = _merge_phrases(jd.responsibilities, as_list("responsibilities"))
-    jd.keywords = _merge_terms(_merge_terms(jd.keywords, jd.hard_skills), as_list("keywords"))
+    jd.keywords = candidate_terms(
+        _merge_terms(_merge_terms(jd.keywords, jd.hard_skills), as_list("keywords")), jd
+    )
+    jd.hard_skills = candidate_terms(jd.hard_skills, jd)
     jd.min_years = jd.min_years if jd.min_years is not None else _min_years(jd.qualifications)
     return jd
 

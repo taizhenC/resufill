@@ -2,8 +2,13 @@
  *
  * Every rule here is chosen for what happens when the PDF's text layer is read back, not
  * for what the page looks like. The constraint was measured, not assumed: rendering a
- * two-column entry header through flexbox and extracting the text puts the right-hand
- * column *after* the bullets, so the dates arrive detached from the job they describe.
+ * two-column entry header and extracting the text puts the right-hand column *after* the
+ * bullets, so the dates arrive detached from the job they describe. Re-measured against
+ * Chromium since, across every way of doing it — flexbox, float, grid, a width-constrained
+ * inline-block, and a justified line with `text-align-last` — and all five fail the same
+ * way: every date in the document lands together at the very end of the extracted text.
+ * A flush-right date column and a correct text layer cannot both be had from this renderer,
+ * and the text layer is the thing an ATS actually reads.
  *
  * Therefore, and without exception:
  *   - one column, no flex, no grid, no float, no absolute positioning;
@@ -30,7 +35,9 @@ body {
      silently substitutes, and one that loads may subset in ways that hurt extraction. */
   font-family: "Helvetica Neue", Helvetica, Arial, "Liberation Sans", sans-serif;
   color: #000;
-  line-height: 1.32;
+  /* Tight, because the entry header costs two lines per entry and the page budget is one
+     page. Below about 1.2 the descenders start touching the next line's capitals. */
+  line-height: 1.25;
   margin: 0;
   /* Justification inserts wide inter-word gaps that some extractors read as column
      breaks. Ragged right costs nothing and removes the risk. */
@@ -38,7 +45,7 @@ body {
 }
 
 header {
-  margin-bottom: 0.55em;
+  margin-bottom: 0.35em;
 }
 
 h1 {
@@ -64,8 +71,8 @@ h2 {
   text-transform: uppercase;
   letter-spacing: 0.06em;
   border-bottom: 0.75pt solid #000;
-  margin: 0.85em 0 0.3em;
-  padding-bottom: 0.1em;
+  margin: 0.55em 0 0.22em;
+  padding-bottom: 0.08em;
 }
 
 section {
@@ -75,12 +82,14 @@ section {
 }
 
 .entry {
-  margin-bottom: 0.5em;
+  margin-bottom: 0.35em;
   break-inside: avoid;
 }
 
-/* The entry header is one line of running text: employer, then role, then place and dates.
-   Separated by a pipe so the pieces stay distinguishable to a parser without any layout. */
+/* Two lines of running text, never two columns. First: what the role was and when — the
+   job title, the project name, the institution, each with its dates inline after a pipe.
+   Second: the context under it — employer and place, the project's stack, the degree.
+   The pipe keeps the pieces distinguishable to a parser without any layout doing the work. */
 .entry-head {
   margin: 0;
 }
@@ -89,12 +98,17 @@ section {
   font-weight: 700;
 }
 
-.entry-head .secondary {
-  font-style: italic;
+.entry-head .dates {
+  white-space: nowrap;
 }
 
 .entry-head .sep {
   padding: 0 0.25em;
+}
+
+.entry-sub {
+  font-style: italic;
+  margin: 0;
 }
 
 ul {

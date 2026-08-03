@@ -43,7 +43,11 @@ def test_init_refuses_to_clobber_an_edited_profile(linkedin_export, tmp_path, ca
 
 
 def test_init_with_nothing_to_read_fails_loudly(tmp_path, capsys):
-    code = main(["init", "--linkedin-export", str(tmp_path / "nope"), "--out", str(tmp_path / "p.yaml")])
+    # Both sources named explicitly and both absent. Leaving --resume-pdf off would let
+    # _lone_pdf fall back to a stray PDF next to the checkout, so what the test asserts
+    # would depend on the developer's working directory.
+    code = main(["init", "--linkedin-export", str(tmp_path / "nope"),
+                 "--resume-pdf", str(tmp_path / "nope.pdf"), "--out", str(tmp_path / "p.yaml")])
     assert code == 1
     assert "nothing to bootstrap from" in capsys.readouterr().out
 

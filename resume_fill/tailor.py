@@ -28,7 +28,8 @@ traced to the source catalogue you were given. It checks, mechanically:
 
   - every bullet cites at least one source id that exists;
   - every number in a bullet appears in the cited source;
-  - every technology named in a bullet appears in the cited source or in DECLARED SKILLS.
+  - every technology named in a bullet appears in the cited source or in DECLARED SKILLS;
+  - every bullet cites the entry it is printed under, never a different one.
 
 So: rephrase freely, select aggressively, and never add a fact. If the posting wants \
 something the catalogue does not contain, leave it out. The report tells the candidate it \
@@ -61,14 +62,27 @@ _USER = """Write a résumé for this posting, using only the catalogue below.
    they are filled in from the record automatically.
 2. Every bullet must list the source ids it came from. Cite the narrowest id that supports
    it (a highlight id, not the whole entry) so the citation means something.
+2a. A bullet may only cite the entry it sits under, or that entry's own highlights. Each
+   role is a separate entry with its own bullets — never move work from one employer under
+   another to save space. If a role is worth its bullets, select it; if it is not, drop the
+   role and its bullets together.
 3. Numbers: only figures that appear in the cited source. Never round, restate or infer one.
 4. Technologies: only ones named in the cited source, or listed in DECLARED SKILLS.
 5. The skills block must be a subset of DECLARED SKILLS. Reorder and trim it for this
    posting — that is the whole point — but add nothing.
 6. Lead each bullet with what was done and how it turned out. Prefer the entries and
    bullets that answer this posting's requirements; drop the ones that do not.
-7. Budget: about {bullet_budget} bullets in total across all sections, so it fits
-   {max_pages} page(s). Fewer, sharper bullets beat more.
+7. Budget: about {bullet_budget} bullets in total across all sections, filling {max_pages}
+   full page(s). Fill the page — select every entry that earns its space and give the strong
+   ones three or four bullets. A résumé that ends two-thirds down the page has thrown away
+   the room it had to make its case. Going slightly over is better than leaving the page
+   short: overflow gets trimmed on the next pass, empty space does not.
+8. Do not write a summary or profile paragraph. Leave "summary" empty. The bullets carry
+   the argument, and the space is worth more spent on a job or a project.
+9. Match the posting's own vocabulary wherever the record already supports it. If the
+   posting says "code review" and a recorded highlight describes assessing other people's
+   code against rubrics, write it as code review — same fact, the reader's words. This is
+   rephrasing, which is allowed and wanted; adding a fact is not.
 {extra_rules}
 === OUTPUT ===
 Return JSON exactly in this shape:
@@ -135,8 +149,15 @@ def catalogue(profile: Profile, corpus: Corpus | None = None) -> str:
 
 def bullet_budget(max_pages: int) -> int:
     """A page of single-column 10.5pt text holds roughly this many résumé bullets once the
-    header, section rules and entry headers have taken their share."""
-    return max(6, 14 * max(1, max_pages))
+    header, section rules and two-line entry headers have taken their share.
+
+    Aim at the top of the range, not the middle. Overflow is recoverable — the page check
+    fails and the loop trims on the next pass — but a résumé that stops two-thirds down the
+    page has thrown away the space, and nothing downstream notices or complains.
+    """
+    # Measured on a two-line-header layout with no summary: 12 bullets left a third of the
+    # page empty, 18 spilled onto a second page. 16 fills it.
+    return max(8, 16 * max(1, max_pages))
 
 
 def build_prompt(

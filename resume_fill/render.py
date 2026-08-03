@@ -58,24 +58,58 @@ def environment(cfg: Settings) -> Environment:
 # ------------------------------------------------------------- context ----
 
 
-def _part(text: str, *, italic: bool = False) -> dict:
-    return {"text": text, "italic": italic}
+# A stack line is a glance, not an inventory. Past this many the line wraps and stops being
+# scannable — which is the only thing it was for.
+_STACK_LIMIT = 8
+
+
+def _stack(entry) -> str:
+    """The technologies a project's own highlights are tagged with, in recorded order.
+
+    Facts from profile.yaml, resolved here like every other fact, so a project gets the
+    one-line stack summary a reader scans for without the tailor writing it. Recorded order
+    means the tags on the first highlight win, and the first highlight is the one worth
+    leading with — so truncation drops the least important names.
+    """
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for highlight in entry.highlights:
+        for skill in highlight.skills:
+            if (key := skill.casefold()) not in seen:
+                seen.add(key)
+                ordered.append(skill)
+    return ", ".join(ordered[:_STACK_LIMIT])
 
 
 def _entry_context(entry, bullets: list[str], kind: str) -> dict:
-    """One résumé entry, with its facts taken from the profile rather than the document."""
+    """One résumé entry, with its facts taken from the profile rather than the document.
+
+    Two lines: what it was and when, then the context underneath it. The thing a reader
+    scans for leads — the job title, the project name, the institution — because the entry
+    header is the only place the eye stops before the bullets.
+
+    Dates stay inline on the first line rather than flush right. Right-aligning them needs
+    flex, grid, float or a justified line, and all four move the date to the end of the PDF's
+    text layer, detached from the job it belongs to; see the header of resume.css.
+    """
     if kind == "experience":
-        parts = [_part(entry.title, italic=True), _part(entry.location), _part(entry.dates)]
+        primary = entry.title
+        secondary = " - ".join(p for p in (entry.company, entry.location) if p)
     elif kind == "projects":
-        parts = [_part(entry.url), _part(entry.dates)]
+        primary = entry.name
+        url = entry.url.split("://", 1)[-1].rstrip("/")
+        secondary = " - ".join(p for p in (_stack(entry), url) if p)
     else:
-        degree = " ".join(p for p in (entry.degree, entry.field_of_study) if p)
+        degree = " - ".join(p for p in (entry.degree, entry.field_of_study) if p)
         gpa = f"GPA {entry.gpa}" if entry.gpa else ""
-        parts = [_part(degree, italic=True), _part(entry.location), _part(gpa), _part(entry.dates)]
-    primary = entry.company if kind == "experience" else (
-        entry.name if kind == "projects" else entry.institution
-    )
-    return {"primary": primary, "parts": [p for p in parts if p["text"]], "bullets": bullets}
+        primary = entry.institution
+        secondary = " - ".join(p for p in (degree, entry.location, gpa) if p)
+    return {
+        "primary": primary,
+        "secondary": secondary,
+        "dates": entry.dates,
+        "bullets": bullets,
+    }
 
 
 def _entries_section(doc: ResumeDoc, profile: Profile, kind: str) -> dict | None:
@@ -102,7 +136,7 @@ def _entries_section(doc: ResumeDoc, profile: Profile, kind: str) -> dict | None
 def build_context(doc: ResumeDoc, profile: Profile, cfg: Settings, *, css: str = "") -> dict:
     sections: list[dict] = []
     for name in doc.ordered_sections():
-        if name == "summary" and doc.summary.strip():
+        if name == "summary" and doc.summary.strip() and cfg.RESUME_SUMMARY:
             sections.append({"kind": "summary", "title": SECTION_TITLES[name], "text": doc.summary.strip()})
         elif name == "skills":
             groups = [(label, ", ".join(items)) for label, items in doc.skills.items() if items]
