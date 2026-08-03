@@ -2,6 +2,7 @@ import pytest
 
 from resume_fill.jd import (
     JobDescription,
+    candidate_terms,
     enrich,
     parse,
     parse_deterministic,
@@ -156,3 +157,37 @@ def test_enrich_ignores_a_model_that_returns_the_wrong_types():
     jd = enrich(parse_deterministic(POSTING), sloppy)
     assert jd.title == "Backend Engineer, Data Platform"
     assert "Python" in jd.hard_skills
+
+
+def test_keywords_keep_only_what_a_candidate_could_claim():
+    """The scorer weights keyword coverage at 0.20 and report.md prints the misses as gaps.
+    Both are meaningless when the list holds the employer's name, the city, or the word
+    "internship": no résumé can contain them, so the component is unearnable by construction
+    and the gap list reads as a lecture about things that were never the candidate's to have.
+    """
+    jd = JobDescription(raw="", title="Software Engineer Intern", company="Vierra")
+    kept = candidate_terms(
+        ["JavaScript", "Git", "Vierra", "software engineer intern", "internship", "entry level",
+         "hybrid", "senior engineer mentorship", "sprint planning", "version control"],
+        jd,
+    )
+    assert kept == ["JavaScript", "Git", "sprint planning", "version control"]
+
+
+def test_a_domain_term_inside_the_job_title_is_still_a_skill():
+    """"Backend Engineer, Data Platform" gives up "data platform" — a thing a candidate can
+    have worked on and can put in a bullet. Only the whole title echoed back is noise."""
+    jd = JobDescription(raw="", title="Backend Engineer, Data Platform", company="Northwind")
+    assert candidate_terms(["data platform", "Backend Engineer, Data Platform"], jd) == ["data platform"]
+
+
+def test_dispositions_and_qualification_prose_are_not_search_terms():
+    """A recruiter searches "PostgreSQL", never "eagerness to learn", and no bullet can
+    contain "ability to commit six months". Scoring their absence measures nothing."""
+    jd = JobDescription(raw="", title="Backend Engineer", company="Northwind")
+    kept = candidate_terms(
+        ["PostgreSQL", "distributed systems", "eagerness to learn", "attention to detail",
+         "ability to commit six months", "software development experience", "strong communicator"],
+        jd,
+    )
+    assert kept == ["PostgreSQL", "distributed systems"]

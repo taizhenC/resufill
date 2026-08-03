@@ -63,6 +63,10 @@ class Settings(BaseSettings):
 
     # --- Document shape -------------------------------------------------------
     RESUME_MAX_PAGES: int = 1
+    # Off by default. A summary restates what the bullets below already prove, and it is the
+    # one block on the page with no citation of its own — the space buys more where it is
+    # spent on a job or a project. Set true to get one back.
+    RESUME_SUMMARY: bool = False
     # A cover letter that runs to two pages does not get read; the budget is the point.
     COVER_LETTER_MAX_PAGES: int = 1
     COVER_LETTER_WORDS: int = 300

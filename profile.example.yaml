@@ -92,7 +92,7 @@ projects:
 skills:
   Languages: [Python, SQL, TypeScript, C++]
   Frameworks: [FastAPI, pytest, React]
-  Data: [PostgreSQL, SQLite, pandas]
+  Data: [PostgreSQL, SQLite, pandas, data pipelines]
   Tools: [Git, Docker, Linux, GitHub Actions]
 
 certifications:

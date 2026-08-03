@@ -9,7 +9,7 @@ coverage has exactly one cheap way to raise its score — invent keywords — so
 only honest for as long as this gate holds. Everything here is therefore a hard failure
 fed back to the tailor, not a warning printed at the end.
 
-Three rules, in order of how often they catch something real:
+Four rules, in order of how often they catch something real:
 
   1. Every bullet cites at least one Source, and every cited id resolves.
   2. Every number in a bullet appears in what those Sources actually say.
@@ -18,6 +18,9 @@ Three rules, in order of how often they catch something real:
      keep that block to things you would defend in an interview. Per-highlight skill
      tags do *not* get that licence: they are part of their own highlight's evidence,
      so citing job A cannot claim a tool tagged only on job B.
+  4. Every bullet is evidenced by the entry it is printed under. Rules 1-3 ask whether a
+     claim is true of the candidate; this one asks whether it is true of *this job*, which
+     is a different question and the one an interviewer asks.
 """
 
 from __future__ import annotations
@@ -29,7 +32,7 @@ from .document import CoverLetter, LinkedInDraft, ResumeDoc
 from .lexicon import technical_tokens
 from .profile import Profile
 from .source import SourceIndex, resolve, supporting_text
-from .textutil import contains_term, normalize, numbers, supports_number, truncate
+from .textutil import contains_term, normalize, numbers, supports_number, term_in, truncate
 
 # Which Source kinds may fill which section of the document. Selecting a blog post as an
 # "experience" entry would produce a job with no employer and no dates.
@@ -70,7 +73,7 @@ def _claims_against(
                 )
             )
     for term in technical_tokens(text):
-        if term.casefold() in declared or term.casefold() in allowed or contains_term(supporting, term):
+        if term_in(term, declared) or term_in(term, allowed) or contains_term(supporting, term):
             continue
         found.append(
             Violation(
@@ -89,6 +92,8 @@ def check(doc: ResumeDoc, profile: Profile, index: SourceIndex) -> list[Violatio
     declared = {s.casefold() for s in profile.declared_skills()}
     selected_ids: list[str] = []
     rejected: set[str] = set()
+    # where -> the ids a bullet sitting under that entry may cite. See _check_attribution.
+    owned: dict[str, set[str]] = {}
 
     for section, entries in doc.entry_groups():
         allowed = _ALLOWED_KINDS[section]
@@ -111,6 +116,7 @@ def check(doc: ResumeDoc, profile: Profile, index: SourceIndex) -> list[Violatio
                 rejected.add(where)
                 continue
             selected_ids.append(entry.source_id)
+            owned[where] = {entry.source_id, *source.children}
             if not entry.bullets:
                 violations.append(Violation("empty_entry", where, "was selected but given no bullets"))
 
@@ -133,6 +139,9 @@ def check(doc: ResumeDoc, profile: Profile, index: SourceIndex) -> list[Violatio
                 Violation("unknown_source", where, f"cites unknown id(s): {', '.join(missing)}")
             )
             continue
+        if misattributed := _check_attribution(index, bullet.source_ids, where, owned):
+            violations.append(misattributed)
+            continue
         violations.extend(
             _claims_against(bullet.text, supporting_text(index, bullet.source_ids), declared, where)
         )
@@ -143,14 +152,48 @@ def check(doc: ResumeDoc, profile: Profile, index: SourceIndex) -> list[Violatio
     return violations
 
 
+# Kinds that belong to exactly one entry, and so may only be cited under that entry. The
+# blog corpus and the declared-skills block deliberately do not: evidence adds specifics to
+# a bullet wherever it sits, and a declared skill is a fact about the person, not the job.
+_ENTRY_KINDS = frozenset({"experience", "education", "project", "certification"})
+
+
+def _check_attribution(
+    index: SourceIndex, source_ids: list[str], where: str, owned: dict[str, set[str]]
+) -> Violation | None:
+    """Rule 4: a bullet must be evidenced by the entry it is printed under.
+
+    Rules 1-3 police whether a claim is true of the *candidate*; this one polices whether it
+    is true of *this job*. Without it a document that cites nothing but real ids still
+    misattributes: the tailor's cheapest way to fill a page is to select one role and hang
+    every good bullet off it, which reads as though work done elsewhere happened there. The
+    facts survive, the employer next to them does not, and that is the version an interviewer
+    catches.
+    """
+    own = owned.get(where.rsplit(".", 1)[0])
+    if own is None:
+        return None
+    foreign = [
+        sid for sid in source_ids
+        if sid not in own and (src := index.get(sid)) is not None and src.kind in _ENTRY_KINDS
+    ]
+    if not foreign:
+        return None
+    labels = ", ".join(f"{sid} ({index[sid].label})" for sid in foreign)
+    return Violation(
+        "misattributed_bullet", where,
+        f"is printed under one entry but cites another: {labels}",
+    )
+
+
 def _check_skills(doc: ResumeDoc, profile: Profile) -> list[Violation]:
     """The skills block is the highest-value place to fabricate and the easiest to check:
     it must be a subset of what profile.yaml declares."""
-    declared = {s.casefold(): s for s in profile.all_skills()}
+    declared = {s.casefold() for s in profile.all_skills()}
     found = []
     for category, skills in doc.skills.items():
         for skill in skills:
-            if skill.casefold() not in declared:
+            if not term_in(skill, declared):
                 found.append(
                     Violation(
                         "undeclared_skill", f"skills[{category}]",
@@ -274,6 +317,10 @@ _ADVICE = {
     "unsupported_term": "Remove the technology, or cite a source that names it. If the job wants "
                         "it and the record does not have it, leave it out — it is a gap, and the "
                         "report says so.",
+    "misattributed_bullet": "A bullet may only cite the entry it appears under, or that "
+                            "entry's own highlights. Work done at one employer cannot be "
+                            "listed under another: select that entry separately and put the "
+                            "bullet there.",
     "uncited_bullet": "Every bullet must list the source ids it came from.",
     "unknown_source": "Use ids exactly as they appear in the source catalogue.",
     "unknown_entry": "Select only entries that exist in the catalogue.",

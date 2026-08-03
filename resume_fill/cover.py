@@ -54,9 +54,12 @@ Company: {company}
 === RULES ===
 1. {paragraph_count} paragraphs, about {words} words in total. Shorter is better than padded.
 2. Every paragraph lists the source ids behind it. Cite the narrowest id that supports it.
-3. Open by naming the role you are applying for and the single most relevant thing in the
-   record. The letter has no subject line, so this opening is what tells the reader which
-   job it is about. Do not waste it on "I am writing to apply for".
+3. The first paragraph is a sentence about your work, not a label. Never open with a
+   subject line, a re-line, or a heading such as "Application for X" or "Re: X" — the
+   letter has no subject line by design and one written into the prose reads like a form.
+   Never open with "I am writing to apply for" either. Open with what you have built or
+   done that bears on this role, naming the technologies, and let the role follow from it.
+   A reader who finishes the first sentence should know what you work on and in what.
 4. The middle paragraph(s) answer this posting's requirements with specific, cited work.
 5. Numbers: only figures that appear in the cited source. Technologies: only ones named in
    the cited source or in DECLARED SKILLS.

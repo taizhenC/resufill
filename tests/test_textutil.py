@@ -1,3 +1,5 @@
+import pytest
+
 from resume_fill.textutil import (
     contains_term,
     normalize,
@@ -72,3 +74,26 @@ def test_truncate_prefers_a_word_boundary():
     """These end up as citation labels in report.md, where "...single-threaded cro" reads
     as a bug rather than as a truncation."""
     assert truncate("Rewrote the single-threaded cron script", 32) == "Rewrote the single-threaded…"
+
+
+@pytest.mark.parametrize(
+    ("haystack", "term", "expected"),
+    [
+        # The failure this exists for: the record says "LLMs", the bullet says "LLM", and
+        # four straight generation attempts were rejected over the letter s.
+        ("evaluate and validate training datasets for LLMs", "LLM", True),
+        ("worked with an LLM", "LLMs", True),
+        ("built REST APIs", "REST API", True),
+        # A trailing s is not evidence of a plural.
+        ("we use classes here", "class", True),
+        ("one class only", "classes", True),
+        ("ran on Kubernetes", "Kubernetes", True),
+        # ...and the widening must not become a licence. The general "es" rule would turn
+        # "Go" into "goes" and let any source using the ordinary verb claim the language.
+        ("the process goes through review", "Go", False),
+        ("deployed on Kubernetes", ".NET", False),
+        ("a Python script", "Java", False),
+    ],
+)
+def test_a_plural_in_the_record_supports_the_singular_in_a_bullet(haystack, term, expected):
+    assert contains_term(haystack, term) is expected

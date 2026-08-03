@@ -51,6 +51,47 @@ def _bounded(core: str, needle: str) -> str:
     return f"{left}{core}{right}"
 
 
+def term_in(term: str, vocabulary: set[str]) -> bool:
+    """Is `term` one of `vocabulary`, counting singular and plural as the same word?
+
+    Set membership alone splits "API" from "APIs" and rejects a bullet over which one the
+    sentence happened to want. `vocabulary` is expected casefolded.
+    """
+    low = term.casefold().strip()
+    if low in vocabulary:
+        return True
+    return any(variant in vocabulary for variant in plural_variants(low))
+
+
+def plural_variants(needle: str) -> list[str]:
+    """The same claim spelled singular and plural.
+
+    "LLM" and "LLMs" are one term, and which one gets written is an accident of the sentence
+    it lands in. Without this the gate rejects a bullet saying "LLM" against a record that
+    says "LLMs" — the fact is right there, and the rejection is about grammar.
+
+    Deliberately narrow. "es" is only appended after the endings that actually take it in
+    English, because the general rule turns "Go" into "goes" and would let any source
+    containing the ordinary verb license a claim about the language.
+    """
+    if not needle[-1:].isalnum() or len(needle) < 2:
+        return []
+    # Both directions, always. A trailing "s" is not evidence the word is a plural —
+    # "class", "Kubernetes" and "analysis" all end in one — so a needle ending in "s" has to
+    # try growing as well as shrinking, or "class" never finds "classes".
+    variants = []
+    if needle.endswith("ies") and len(needle) > 4:
+        variants.append(needle[:-3] + "y")
+    if needle.endswith(("ses", "xes", "zes", "ches", "shes")):
+        variants.append(needle[:-2])
+    if needle.endswith("s") and len(needle) > 2:
+        variants.append(needle[:-1])
+    variants.append(needle + "s")
+    if needle.endswith(("s", "x", "z", "ch", "sh")):
+        variants.append(needle + "es")
+    return list(dict.fromkeys(variants))
+
+
 def contains_term(haystack: str, term: str) -> bool:
     """Does `haystack` contain `term` as a term, not as a substring?
 
@@ -68,6 +109,9 @@ def contains_term(haystack: str, term: str) -> bool:
         return False
     if re.search(_bounded(re.escape(needle), needle), hay):
         return True
+    for variant in plural_variants(needle):
+        if re.search(_bounded(re.escape(variant), variant), hay):
+            return True
     runs = re.findall(r"[a-z0-9]+", needle)
     if len(runs) < 2:
         return False

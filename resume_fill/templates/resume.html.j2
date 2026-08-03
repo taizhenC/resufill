@@ -36,12 +36,16 @@
   {% elif section.kind == 'entries' %}
     {% for entry in section.entries %}
   <div class="entry">
-    {# One line of running text. No columns: a two-column header reorders in the text
-       layer, which is how dates end up attached to the wrong job. #}
+    {# Running text, one column. No flex/grid/float/justify anywhere near this: every one
+       of them moves the dates to the end of the PDF's text layer, away from the job they
+       describe. Measured, not assumed — see the header of resume.css. #}
     <p class="entry-head">
       <span class="primary">{{ entry.primary }}</span>
-      {%- for part in entry.parts %}<span class="sep">|</span>{% if part.italic %}<span class="secondary">{{ part.text }}</span>{% else %}<span>{{ part.text }}</span>{% endif %}{% endfor %}
+      {%- if entry.dates %}<span class="sep">|</span><span class="dates">{{ entry.dates }}</span>{% endif %}
     </p>
+    {% if entry.secondary %}
+    <p class="entry-sub">{{ entry.secondary }}</p>
+    {% endif %}
     {% if entry.bullets %}
     <ul>
       {% for bullet in entry.bullets %}<li>{{ bullet }}</li>{% endfor %}

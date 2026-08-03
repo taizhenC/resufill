@@ -111,6 +111,32 @@ def test_a_project_cannot_be_promoted_into_employment(example_profile):
     assert [v.kind for v in violations] == ["wrong_section"]
 
 
+def test_a_bullet_cannot_be_filed_under_a_different_employer(example_profile):
+    """The failure this exists for: every id is real, every claim is true of the candidate,
+    and the résumé still says the work happened somewhere it did not. Cheapest way to fill a
+    page is to select one role and hang every good bullet off it."""
+    doc = _doc(
+        experience=_experience(
+            "exp-northwind-backend",
+            ("Handled ~40 support tickets a week.", ["exp-campus-it.h1"]),
+        )
+    )
+    violations = check(doc, example_profile, example_profile.sources())
+    assert [v.kind for v in violations] == ["misattributed_bullet"]
+    assert "exp-campus-it.h1" in violations[0].detail
+
+
+def test_a_bullet_may_cite_its_own_entry_and_its_own_highlights(example_profile):
+    doc = _doc(
+        experience=_experience(
+            "exp-northwind-backend",
+            ("Rewrote the nightly ingestion job.", ["exp-northwind-backend.h1"]),
+            ("Owned the ingestion path end to end.", ["exp-northwind-backend"]),
+        )
+    )
+    assert check(doc, example_profile, example_profile.sources()) == []
+
+
 def test_the_skills_block_cannot_grow(example_profile):
     """The cheapest place to fabricate, and the easiest to check: it must be a subset."""
     doc = _doc(skills={"Cloud": ["Kubernetes", "Python"]})

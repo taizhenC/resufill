@@ -77,7 +77,12 @@ class Basics(BaseModel):
     links: list[Link] = Field(default_factory=list)
 
     def contact_line(self) -> str:
-        parts = [self.location, self.phone, self.email] + [link.url for link in self.links]
+        """One line, and it has to stay one line: it is the first thing a parser reads and
+        the first thing a human does. Links are shown bare — `github.com/you` rather than
+        `https://github.com/you/` — because the scheme costs eight characters, carries no
+        information, and three of them together wrap the line onto a second row."""
+        links = [link.url.split("://", 1)[-1].rstrip("/") for link in self.links]
+        parts = [self.location, self.phone, self.email, *links]
         return " | ".join(p for p in parts if p)
 
 
