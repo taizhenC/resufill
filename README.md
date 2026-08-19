@@ -127,6 +127,19 @@ failure — every build extracts the text back out of the file it just produced 
 contact block, every section heading and every bullet survived the round trip. That is the
 guarantee that actually matters.
 
+### Where the rules come from
+
+[`docs/research/ats-and-cover-letters.md`](docs/research/ats-and-cover-letters.md) is the brief the
+checks in `ats.py` and `letter_review.py` are built on: what each of the seven major ATS platforms
+documents itself as doing, which formatting choices measurably break parsing, and what the cover
+letter evidence actually supports.
+
+Read the last two sections first. One cross-references every check this tool implements against
+what its sources say — including **the checks that turned out to rest on nothing**, which is how
+`MIN_QUANTIFIED` came to be labelled a house convention and how the date format came to be wrong in
+the opposite direction from the obvious one. The other lists the widely-repeated claims that could
+not be verified, so nobody re-derives them later and assumes somebody checked.
+
 ## LinkedIn
 
 Draft-and-paste, by design. LinkedIn has no public write API for profile fields, and automating the

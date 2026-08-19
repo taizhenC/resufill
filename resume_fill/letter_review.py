@@ -27,6 +27,9 @@ The prompt in cover.py already asks for all of this. A prompt is a request; this
 check. That distinction is the same one ground.py rests on, and it exists for the same
 reason: the model complies most of the time, and "most of the time" is not a guarantee.
 
+Every claim above is sourced in docs/research/ats-and-cover-letters.md, which also records
+what was checked and found wanting — including the two things this module used to assert.
+
 What is deliberately not checked: tone, warmth, "passion", or anything else that would
 require an opinion about the candidate rather than a fact about the text. A letter that
 fails nothing here can still be a bad letter — this catches the failures that are *legible*,
