@@ -137,6 +137,8 @@ export interface DocumentRecord {
   claims: Claim[];
   blocked_terms: string[];
   violations: string[];
+  /** What the gate cut out of the draft so the rest could be kept. */
+  removed: string[];
 }
 
 export interface RunRecord {

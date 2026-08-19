@@ -61,6 +61,7 @@ def build(
     threshold: float,
     blocked_terms: list[str],
     violations: list[Violation],
+    removed: list[str] | None = None,
 ) -> str:
     lines: list[str] = [
         f"# {jd.title or 'Untitled role'} — {jd.company or 'unknown company'}",
@@ -123,6 +124,19 @@ def build(
             "",
         ]
 
+    if removed:
+        lines += [
+            "## Removed so the rest could be kept",
+            "",
+            "The draft claimed these and the record could not back them, so they were cut and the",
+            "remainder was put back through the same gate. This résumé is therefore shorter than",
+            "the one the model wrote — which is the trade, and it is stated here rather than",
+            "absorbed silently.",
+            "",
+            *[f"- {item}" for item in removed],
+            "",
+        ]
+
     if blocked_terms:
         lines += [
             "## Blocked by the grounding gate",
@@ -171,6 +185,13 @@ def cover_section(cover_run, jd: JobDescription, index: SourceIndex) -> str:
         lines += [best.verify_report.summary(), ""]
         if best.verify_report.missing:
             lines += [f"- {item}" for item in best.verify_report.missing] + [""]
+    if best.repair is not None and best.repair.dropped:
+        lines += [
+            "## Removed so the rest could be kept",
+            "",
+            *[f"- {v.where} — {v.detail}" for v in best.repair.dropped],
+            "",
+        ]
     if best.violations:
         lines += [
             "## Unresolved grounding violations",

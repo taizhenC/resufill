@@ -433,3 +433,23 @@ def test_an_unrelated_json_object_does_not_become_an_empty_resume(example_profil
     with pytest.raises(LLMError, match="no entries selected"):
         generate(example_profile, POSTING, None, _cfg(tmp_path), _scripted({"nope": True}),
                  out_dir=tmp_path / "run")
+
+
+@needs_chromium
+def test_what_repair_removed_is_written_down_not_absorbed(example_profile, tmp_path):
+    """A résumé shorter than the model wrote is a question somebody will ask. Both the
+    prose report and the structured record answer it."""
+    from resume_fill import runrecord
+    from resume_fill.pipeline import run
+
+    out = tmp_path / "run"
+    run(example_profile, POSTING, None, _cfg(tmp_path, MAX_ITER=1), _scripted(FABRICATED),
+        out_dir=out, mode="resume")
+
+    report = (out / "report.md").read_text(encoding="utf-8")
+    assert "Removed so the rest could be kept" in report
+    assert "Kubernetes" in report
+
+    removed = runrecord.load(out).document("resume").removed
+    assert len(removed) == 2
+    assert any("Kubernetes" in item for item in removed)

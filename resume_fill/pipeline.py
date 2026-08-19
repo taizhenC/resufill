@@ -282,6 +282,7 @@ def resume_report(
     best = result.best
     return report_module.build(
         doc=best.document, profile=profile, jd=jd, index=index,
+        removed=best.repair.notes() if best.repair else [],
         score=best.score or score_module.score(best.document, profile, jd, index),
         verify_report=best.verify_report, iterations=len(result.attempts),
         threshold=cfg.SCORE_THRESHOLD, blocked_terms=result.blocked_terms,
@@ -545,6 +546,7 @@ def build_record(
                 claims=runrecord.resume_claims(best.document, index),
                 blocked_terms=list(result.resume.blocked_terms),
                 violations=[str(v) for v in best.violations],
+                removed=best.repair.notes() if best.repair else [],
             )
         )
     if result.cover is not None:
@@ -559,6 +561,11 @@ def build_record(
                 claims=runrecord.cover_claims(best_cover.document, index),
                 blocked_terms=list(result.cover.blocked_terms),
                 violations=[str(v) for v in best_cover.violations],
+                removed=(
+                    [f"{v.where} — {v.detail}" for v in best_cover.repair.dropped]
+                    if best_cover.repair
+                    else []
+                ),
             )
         )
 
