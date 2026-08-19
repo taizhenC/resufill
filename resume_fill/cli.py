@@ -300,6 +300,10 @@ def _report_cover(cover_run) -> int:
     if best.repair is not None and best.repair.dropped:
         print(f"{WARN} {len(best.repair.dropped)} paragraph(s) removed - they claimed more "
               "than the record supports")
+    if best.review is not None and best.review.failed:
+        print(f"{INFO} {best.review.summary()}:")
+        for check in best.review.failed:
+            print(f"     - {'[!]' if check.blocking else '   '} {check.name}: {check.detail}")
     if cover_run.blocked_terms:
         print(f"{INFO} the gate blocked these claims: " + ", ".join(cover_run.blocked_terms[:12]))
     if not cover_run.ok:

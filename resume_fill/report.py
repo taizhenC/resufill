@@ -264,6 +264,21 @@ def cover_section(cover_run, jd: JobDescription, index: SourceIndex) -> str:
             *[f"- {v.where} — {v.detail}" for v in best.repair.dropped],
             "",
         ]
+    if getattr(best, "review", None) is not None:
+        lines += ["## How it reads", "", best.review.summary() + ".", ""]
+        if best.review.failed:
+            lines += ["| | Check | What it found |", "|---|---|---|"]
+            lines += [
+                f"| {'✗' if c.blocking else '!'} | {c.name} | {c.detail} |"
+                for c in best.review.failed
+            ]
+            lines += [
+                "",
+                "> `✗` is something a rewrite reliably fixes and the loop retried on. `!` is",
+                "> advisory. None of it is a judgement about the content — see the header of",
+                "> `letter_review.py` for what is deliberately not checked.",
+                "",
+            ]
     if best.violations:
         lines += [
             "## Unresolved grounding violations",
