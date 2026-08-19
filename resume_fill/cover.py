@@ -74,12 +74,15 @@ Company: {company}
 6. Do not restate the job advert back to the reader — they wrote it — and do not praise the
    company. Praise is unverifiable, costs words, and appears in every other letter in the
    pile, so it cannot distinguish this one.
-7. Write it the way you would say it out loud. Readers report recognising machine-written
-   applications and reacting badly, and the tells are a small vocabulary rather than
-   anything subtle. Do not use: delve, tapestry, testament to, "navigate the complexities",
-   "in today's fast-paced", "ever-evolving", "align perfectly with", "leverage my",
-   "a proven track record of success", "meticulous attention to detail", "seamlessly",
-   "robust solutions", "hit the ground running", "wealth of experience", "synergy".
+7. Write it the way you would say it out loud. Two lists, for two different reasons.
+   Words a model measurably over-produces and almost nobody says: delve, tapestry,
+   underscores, showcasing, meticulous, intricate, garnered, realm, pivotal, multifaceted,
+   groundbreaking, unparalleled, transformative, invaluable, commendable, noteworthy,
+   "testament to", "navigate the complexities". And business clichés, which predate all of
+   this and are simply empty: synergy, "game-changer", "hit the ground running",
+   "think outside the box", "wear many hats", "a proven track record of success",
+   "cutting-edge solutions", "wealth of experience", "in today's fast-paced",
+   "ever-evolving", "align perfectly with".
 8. Do not open every paragraph with "I".
 9. Address it to {addressee}.
 10. Tone: {tone}
@@ -101,9 +104,15 @@ def addressee_for(jd: JobDescription, cfg: Settings) -> str:
 
 
 def paragraph_budget(words: int) -> int:
-    """Roughly 75 words a paragraph, floored at three: an opening, a middle and a close is
-    the shortest letter that is still a letter."""
-    return max(3, min(5, round(words / 75)))
+    """Roughly 75 words a paragraph, floored at three and capped at four.
+
+    Three is the shortest thing that is still a letter — an opening, a middle and a close.
+    Four is Yale's ceiling, which is the most specific source there is ("three to four
+    paragraphs", with the intro and close at one to three sentences each). UNC says three to
+    five and MIT's structure yields four to five, so five is the union of the sources rather
+    than their consensus.
+    """
+    return max(3, min(4, round(words / 75)))
 
 
 def build_prompt(

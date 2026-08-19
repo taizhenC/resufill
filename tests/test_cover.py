@@ -97,7 +97,9 @@ def test_the_addressee_falls_back_to_a_convention_not_a_guess():
 def test_paragraph_budget_tracks_the_word_budget():
     assert paragraph_budget(150) == 3  # floored: opening, middle, close
     assert paragraph_budget(300) == 4
-    assert paragraph_budget(1000) == 5  # capped
+    # Capped at Yale's four rather than five. Five is the union of the sources; four is what
+    # the most specific one actually says.
+    assert paragraph_budget(1000) == 4
 
 
 def test_the_prompt_states_the_rule_that_separates_enthusiasm_from_a_claim(example_profile):
