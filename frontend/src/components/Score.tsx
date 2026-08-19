@@ -167,6 +167,24 @@ export function GapPanel({ score }: { score: ScoreRecord }) {
         </div>
       )}
 
+      {(score.title_words_missing ?? []).length > 0 && (
+        <div class="gap-group">
+          <h3>Words the posting uses for the role that the résumé does not</h3>
+          <p class="field-hint">
+            The cheapest points on the page. The headline is phrasing, not a claim — the gate
+            polices technologies and figures, not which ordinary words describe the same job — so
+            naming the role the way the reader names it costs nothing and is not fabrication.
+          </p>
+          <ul class="chips">
+            {score.title_words_missing!.map((word) => (
+              <li class="chip" key={word}>
+                {word}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       {score.unaddressed_qualifications.length > 0 && (
         <div class="gap-group">
           <h3>Qualifications the résumé does not answer</h3>

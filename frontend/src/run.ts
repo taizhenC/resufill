@@ -1,7 +1,7 @@
 import { computed, signal } from "@preact/signals";
 
 import { api, ApiError } from "./api";
-import type { JobSnapshot, LoadedRun, RunSummary, StageEvent } from "./types";
+import type { JobSnapshot, LoadedRun, RunSummary, StageEvent, Usage } from "./types";
 
 /** ~1s. Stages are seconds apart, so polling loses nothing a push would gain. */
 const POLL_MS = 1000;
@@ -206,4 +206,21 @@ export function timeline(log: StageEvent[]): TimelineItem[] {
     if (event.stage === "scored") group.outcome = "finished";
   }
   return items;
+}
+
+/**
+ * What a run cost, as a sentence.
+ *
+ * Calls and tokens, never a price. Rates differ per provider and change without notice, and
+ * a stale multiplier rendered to two decimal places would be worse than no number — see
+ * meter.py. Empty for a run made before this was counted, and for one where the provider
+ * reported no usage.
+ */
+export function costLine(usage: Usage | undefined): string {
+  const calls = usage?.calls ?? 0;
+  if (!calls) return "";
+  const parts = [`${calls} model call${calls === 1 ? "" : "s"}`];
+  if (usage?.total_tokens) parts.push(`${usage.total_tokens.toLocaleString()} tokens`);
+  if (usage?.seconds) parts.push(`${Math.round(usage.seconds)}s waiting on the model`);
+  return parts.join(" · ");
 }

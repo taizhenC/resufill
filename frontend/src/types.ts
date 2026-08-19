@@ -51,6 +51,15 @@ export interface StageEvent {
   ok?: boolean;
 }
 
+/** meter.Meter.as_dict(). Deliberately not a price — see meter.py. */
+export interface Usage {
+  calls?: number;
+  prompt_tokens?: number;
+  completion_tokens?: number;
+  total_tokens?: number;
+  seconds?: number;
+}
+
 export interface JobSnapshot {
   idle?: boolean;
   id: number;
@@ -67,6 +76,8 @@ export interface JobSnapshot {
   done: boolean;
   ok: boolean;
   error: string | null;
+  /** Live, so the price of another iteration is visible while there is time to cancel one. */
+  usage?: Usage;
 }
 
 export interface RunSummary {
@@ -178,6 +189,8 @@ export interface ScoreRecord {
   gaps_unsurfaced: Gap[];
   stuffed: string[];
   unaddressed_qualifications: string[];
+  /** Words from the posting's own job title the résumé never uses. The cheapest points here. */
+  title_words_missing?: string[];
 }
 
 export interface VerifyRecord {
@@ -185,6 +198,22 @@ export interface VerifyRecord {
   page_count: number;
   missing: string[];
   checks: Record<string, boolean>;
+}
+
+/**
+ * One check from `ats.py` (a résumé) or `letter_review.py` (a letter).
+ *
+ * `kind` is "parsing" | "reading" for a résumé and "blocking" | "advisory" for a letter.
+ * The two vocabularies mean the same thing on each side — the first value is the one that is
+ * not a matter of taste — and the UI treats them as one distinction.
+ */
+export interface RubricCheck {
+  name: string;
+  ok: boolean;
+  detail: string;
+  kind: string;
+  /** What to do about it, in the second person. A check that only says "no" makes you guess. */
+  fix: string;
 }
 
 export interface DocumentRecord {
@@ -198,6 +227,8 @@ export interface DocumentRecord {
   violations: string[];
   /** What the gate cut out of the draft so the rest could be kept. */
   removed: string[];
+  /** The rubric this document was checked against. Empty on runs made before it existed. */
+  ats?: RubricCheck[];
 }
 
 export interface RunRecord {
@@ -209,6 +240,8 @@ export interface RunRecord {
   cancelled: boolean;
   jd: JobRecord;
   settings: Record<string, string | number | boolean>;
+  /** What the run cost: calls, tokens, seconds. Empty on runs made before it was counted. */
+  usage?: Usage;
   score: ScoreRecord | null;
   documents: DocumentRecord[];
   legacy?: false;

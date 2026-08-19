@@ -4,6 +4,7 @@ import { api } from "../api";
 import { documentLabel } from "../run";
 import type { Claim, DocumentRecord } from "../types";
 import { CoverLetterText } from "./CoverLetterText";
+import { Rubric } from "./Rubric";
 
 export function DocumentPanel({ runId, document }: { runId: string; document: DocumentRecord }) {
   const verify = document.verify;
@@ -60,6 +61,8 @@ export function DocumentPanel({ runId, document }: { runId: string; document: Do
           </ul>
         </div>
       )}
+
+      <Rubric checks={document.ats ?? []} kind={document.kind} />
 
       {document.blocked_terms.length > 0 && (
         <div class="gap-group">

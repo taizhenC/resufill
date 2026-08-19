@@ -2,7 +2,7 @@ import { api } from "../api";
 import { DocumentPanel } from "../components/DocumentPanel";
 import { GapPanel, ScorePanel } from "../components/Score";
 import { StageLog } from "../components/StageLog";
-import { closeRun, record, recordError, running } from "../run";
+import { closeRun, costLine, record, recordError, running } from "../run";
 import { isLegacy } from "../types";
 import type { LegacyRunRecord } from "../types";
 
@@ -38,6 +38,7 @@ export function RunView() {
                   This run was cancelled. What finished before then was kept.
                 </p>
               )}
+              {costLine(run.usage) && <p class="field-hint cost">{costLine(run.usage)}</p>}
             </section>
 
             {run.score && <ScorePanel score={run.score} />}

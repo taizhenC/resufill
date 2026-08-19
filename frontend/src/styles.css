@@ -944,3 +944,82 @@ a.chip:hover {
     gap: 0.3rem;
   }
 }
+
+/* --- the rubrics ---
+   ats.py and letter_review.py both split their checks into a hard half and an advisory one.
+   That split is the only thing worth styling here: a failed advisory check is not an error,
+   and marking it red would push people to rewrite documents that are fine. */
+
+.rubric {
+  list-style: none;
+  margin: 0.5rem 0 0;
+  padding: 0;
+  display: grid;
+  gap: 0.55rem;
+}
+
+.rubric li {
+  display: grid;
+  grid-template-columns: 1.1rem 1fr;
+  gap: 0.5rem;
+  align-items: start;
+}
+
+.rubric-mark {
+  font-weight: 700;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.rubric-hard .rubric-mark {
+  color: var(--bad);
+}
+
+.rubric-soft .rubric-mark {
+  color: var(--warn);
+}
+
+.rubric-name {
+  margin: 0;
+  font-weight: 600;
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.rubric-tag {
+  font-size: 0.74rem;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--muted);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0.05em 0.5em;
+}
+
+.rubric-hard .rubric-tag {
+  color: var(--bad);
+  border-color: color-mix(in srgb, var(--bad) 40%, var(--line));
+}
+
+/* The fix, not the failure. A check that only says "no" makes the reader guess. */
+.rubric-fix {
+  margin: 0.2rem 0 0;
+  font-size: 0.9rem;
+  color: var(--ink);
+  border-left: 2px solid color-mix(in srgb, var(--accent) 40%, var(--line));
+  padding-left: 0.6rem;
+}
+
+.rubric-quiet .rubric-name {
+  font-weight: 500;
+  color: var(--muted);
+}
+
+/* Calls and tokens, never a price — see meter.py. Sits quiet: it is a fact about the run,
+   not a verdict on it. */
+.cost {
+  font-variant-numeric: tabular-nums;
+}
