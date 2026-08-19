@@ -1,5 +1,14 @@
 import type { ScoreRecord } from "../types";
 
+const STOP_REASON: Record<string, string> = {
+  threshold: "the score reached the threshold",
+  ceiling: "the score reached what your record can reach for this posting",
+  plateau: "another rewrite stopped buying anything",
+  exhausted: "the iteration budget ran out",
+  ungrounded: "no draft survived the grounding gate",
+  cancelled: "the run was cancelled",
+};
+
 /**
  * The score, as a breakdown and never as a bare number.
  *
@@ -8,16 +17,27 @@ import type { ScoreRecord } from "../types";
  * and printing it alone would invite exactly the misreading the caveat exists to prevent.
  */
 export function ScorePanel({ score }: { score: ScoreRecord }) {
+  const ceiling = score.ceiling;
+  // "Below the threshold" is the wrong headline when the threshold was never available to
+  // this record. Which of the three it is changes what the reader should do next, so the
+  // pill says which rather than making them work it out from the number.
+  const reachable = ceiling === null || ceiling >= score.threshold;
+  const verdict = score.met
+    ? { tone: "pill-ok", text: "met the threshold" }
+    : !reachable
+      ? { tone: "pill-ok", text: `all this record could reach — ${ceiling!.toFixed(1)} max here` }
+      : score.at_ceiling
+        ? { tone: "pill-warn", text: "at this record's ceiling" }
+        : { tone: "pill-warn", text: `below the threshold of ${score.threshold}` };
+
   return (
     <section class="card">
       <header class="score-head">
         <div>
           <span class="score-total">{score.total.toFixed(1)}</span>
-          <span class="score-outof">/ 100</span>
+          <span class="score-outof">/ {ceiling === null ? 100 : ceiling.toFixed(1)} reachable</span>
         </div>
-        <span class={`pill ${score.met ? "pill-ok" : "pill-warn"}`}>
-          {score.met ? "met the threshold" : `below the threshold of ${score.threshold}`}
-        </span>
+        <span class={`pill ${verdict.tone}`}>{verdict.text}</span>
       </header>
 
       <p class="caveat">
@@ -25,6 +45,26 @@ export function ScorePanel({ score }: { score: ScoreRecord }) {
         gate blocks invention, the loop cannot raise this by making things up — so a low ceiling
         means the role wants things your record does not have.
       </p>
+
+      {ceiling !== null && !reachable && (
+        <p class="field-hint">
+          The threshold of {score.threshold} was never reachable here: this posting caps at{" "}
+          {ceiling.toFixed(1)} for your record
+          {score.unreachable.length > 0 && <> because of {score.unreachable.slice(0, 8).join(", ")}</>}
+          . That is the answer to the question, not a failure to answer it.
+        </p>
+      )}
+      {ceiling !== null && reachable && !score.met && (
+        <p class="field-hint">
+          {ceiling.toFixed(1)} was reachable for your record, so this shortfall is tailoring rather
+          than experience — look at the unsurfaced keywords below.
+        </p>
+      )}
+      {score.stop_reason && (
+        <p class="field-hint">
+          The loop stopped because <strong>{STOP_REASON[score.stop_reason] ?? score.stop_reason}</strong>.
+        </p>
+      )}
 
       <table class="components">
         <thead>

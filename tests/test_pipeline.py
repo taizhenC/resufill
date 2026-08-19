@@ -81,10 +81,30 @@ for _entry in (
         _bullet["text"] = "Ran production Kubernetes clusters, cutting runtime 94%."
 
 
+# Two drafts that leave something on the table on purpose. The honest one sits *at* the
+# record's ceiling, so the loop now stops on it immediately — which is correct, and useless
+# for testing anything about iteration. These two mention progressively fewer of the things
+# the record can actually support, so there is somewhere left to go.
+MIDDLING = json.loads(json.dumps(HONEST))
+MIDDLING["experience"][0]["bullets"][1]["text"] = (
+    "Added contract tests across the 14 upstream feeds, catching 3 silent schema changes."
+)
+MIDDLING["projects"] = []
+MIDDLING["skills"] = {"Languages": ["Python"]}
+
+WEAKER = json.loads(json.dumps(MIDDLING))
+WEAKER["experience"][0]["bullets"] = WEAKER["experience"][0]["bullets"][:1]
+WEAKER["experience"][0]["bullets"][0]["text"] = (
+    "Rewrote the nightly ingestion job as an asyncio worker pool, cutting the run from 51 "
+    "minutes to 9."
+)
+WEAKER["skills"] = {}
+
 # The honest draft ceilings at 71.2 against this posting, because it asks for Kubernetes
-# and nothing in the record has ever touched it. Loop-control tests therefore use a
-# threshold below that ceiling; the ceiling itself is asserted in its own test.
+# and nothing in the record has ever touched it. That number is now derived rather than
+# asserted by hand — score.ceiling() computes it from the record before any model call.
 HONEST_CEILING = 71.2
+MIDDLING_SCORE = 46.2
 
 
 def _cfg(tmp_path, **kwargs) -> Settings:
@@ -202,13 +222,8 @@ def test_the_best_attempt_is_kept_not_the_last(example_profile, tmp_path):
     """Iteration N can score worse than N-1 — the feedback pushes on gaps and pushing can
     cost coverage elsewhere. Shipping the final draft regardless would make more
     iterations actively harmful."""
-    weaker = json.loads(json.dumps(HONEST))
-    weaker["experience"][0]["bullets"] = weaker["experience"][0]["bullets"][:1]
-    weaker["projects"] = []
-    weaker["skills"] = {"Languages": ["Python"]}
-
-    cfg = _cfg(tmp_path, SCORE_THRESHOLD=100, MAX_ITER=2)  # unreachable: force both attempts
-    result = generate(example_profile, POSTING, None, cfg, _scripted(HONEST, weaker),
+    cfg = _cfg(tmp_path, SCORE_THRESHOLD=100, MAX_ITER=2)
+    result = generate(example_profile, POSTING, None, cfg, _scripted(MIDDLING, WEAKER),
                       out_dir=tmp_path / "run")
 
     assert len(result.attempts) == 2
@@ -227,6 +242,58 @@ def test_the_loop_stops_as_soon_as_the_threshold_is_met(example_profile, tmp_pat
     result = generate(example_profile, POSTING, None, cfg, _scripted(HONEST), out_dir=tmp_path / "run")
     assert len(result.attempts) == 1
     assert result.met_threshold
+
+
+@needs_chromium
+def test_the_loop_stops_at_what_the_record_can_reach(example_profile, tmp_path):
+    """The complaint this exists to answer: a threshold of 99 against a record that tops out
+    at 71.2 used to cost four model calls to learn what the first one already knew.
+
+    ground.py is what makes stopping here honest rather than lazy — the missing points are
+    Kubernetes, the record has never touched it, and no rewrite is permitted to invent it.
+    """
+    cfg = _cfg(tmp_path, SCORE_THRESHOLD=99, MAX_ITER=4)
+    result = generate(example_profile, POSTING, None, cfg, _scripted(HONEST), out_dir=tmp_path / "run")
+
+    assert len(result.attempts) == 1
+    assert result.stop_reason == "ceiling"
+    assert result.at_ceiling
+    assert not result.threshold_reachable
+    assert result.reachable == HONEST_CEILING
+    assert result.ceiling.unreachable == ["Kubernetes"]
+
+
+@needs_chromium
+def test_the_loop_stops_when_a_rewrite_stops_buying_anything(example_profile, tmp_path):
+    """Two attempts that score the same is the loop's own evidence that a third will too.
+    The feedback pushes on gaps; past a point pushing only trades one keyword for another."""
+    cfg = _cfg(tmp_path, SCORE_THRESHOLD=99, MAX_ITER=4)
+    result = generate(example_profile, POSTING, None, cfg, _scripted(MIDDLING),
+                      out_dir=tmp_path / "run")
+
+    assert len(result.attempts) == 2
+    assert result.stop_reason == "plateau"
+    assert not result.at_ceiling  # it stopped short of the ceiling, and says so
+
+
+@needs_chromium
+def test_reaching_the_threshold_still_wins_over_everything_else(example_profile, tmp_path):
+    cfg = _cfg(tmp_path, SCORE_THRESHOLD=1, MAX_ITER=4)
+    result = generate(example_profile, POSTING, None, cfg, _scripted(HONEST), out_dir=tmp_path / "run")
+    assert result.stop_reason == "threshold"
+
+
+@needs_chromium
+def test_the_ceiling_is_known_before_the_first_model_call(example_profile, tmp_path):
+    """It depends only on the record and the posting, which is what makes it a stopping rule
+    rather than an observation about how the run happened to go."""
+    from resume_fill.score import ceiling
+
+    limit = ceiling(example_profile, POSTING, example_profile.sources())
+    assert limit.total == HONEST_CEILING
+    assert limit.unreachable == ["Kubernetes"]
+    assert not limit.is_reachable(80)
+    assert limit.gap_to(80) == pytest.approx(8.8)
 
 
 @needs_chromium
@@ -382,7 +449,9 @@ def test_cancelling_between_stages_stops_the_run_and_keeps_what_finished(example
     out = tmp_path / "run"
     result = run(
         example_profile, POSTING, None, _cfg(tmp_path, SCORE_THRESHOLD=99, MAX_ITER=4),
-        _scripted(HONEST), out_dir=out, mode="resume",
+        # MIDDLING rather than HONEST: an attempt sitting at the record's ceiling now ends
+        # the loop by itself, and there would be nothing left to cancel.
+        _scripted(MIDDLING), out_dir=out, mode="resume",
         progress=Progress(sink=sink, cancel=event),
     )
 

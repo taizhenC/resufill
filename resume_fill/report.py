@@ -15,7 +15,7 @@ from .document import ResumeDoc
 from .ground import Violation
 from .jd import JobDescription
 from .profile import Profile
-from .score import Score
+from .score import Ceiling, Score
 from .source import SourceIndex
 from .verify import VerifyReport
 
@@ -32,6 +32,41 @@ def _table(score: Score) -> list[str]:
         )
     rows.append(f"| **Total** | | | **{score.total:.1f}** | |")
     return rows
+
+
+def _ceiling_note(score: Score, ceiling: Ceiling | None, threshold: float) -> list[str]:
+    """What the threshold means for *this* record and *this* posting.
+
+    Printing "62.4 against a threshold of 80" reads as a failure. Very often it is not one:
+    the posting asked for things the record has never contained, ground.py made sure no
+    rewrite could invent them, and 64.1 was the highest number available before the first
+    word was written. That is worth saying in the same breath as the score, not three
+    sections later in the gap list.
+    """
+    if ceiling is None:
+        return []
+    if ceiling.is_reachable(threshold):
+        if score.total >= threshold:
+            return []
+        return [
+            f"The threshold of {threshold:.0f} was reachable for this record — this posting caps at "
+            f"{ceiling.total:.1f} and the draft got {score.total:.1f}. The shortfall is tailoring, "
+            "not the record: see the unsurfaced keywords below.",
+            "",
+        ]
+    lines = [
+        f"**The threshold of {threshold:.0f} was never reachable here.** The highest score this "
+        f"record can get against this posting is {ceiling.total:.1f}, because the posting asks for "
+        "things nothing in it supports and the grounding gate will not let them be invented. A low "
+        "ceiling is the answer to the question, not a failure to answer it.",
+        "",
+    ]
+    if ceiling.unreachable:
+        lines += [
+            "Out of reach for this record: " + ", ".join(ceiling.unreachable[:15]),
+            "",
+        ]
+    return lines
 
 
 def _citations(doc: ResumeDoc, index: SourceIndex) -> list[str]:
@@ -62,15 +97,24 @@ def build(
     blocked_terms: list[str],
     violations: list[Violation],
     removed: list[str] | None = None,
+    ceiling: Ceiling | None = None,
+    stop_reason: str = "",
 ) -> str:
+    headline = f"**{score.total:.1f} / 100** (threshold {threshold:.0f})"
+    if ceiling is not None:
+        headline = (
+            f"**{score.total:.1f}** of a reachable **{ceiling.total:.1f}** "
+            f"(threshold {threshold:.0f})"
+        )
     lines: list[str] = [
         f"# {jd.title or 'Untitled role'} — {jd.company or 'unknown company'}",
         "",
-        f"Generated {date.today().isoformat()} by resume-fill. Iterations: {iterations}.",
+        f"Generated {date.today().isoformat()} by resume-fill. Iterations: {iterations}"
+        + (f", stopped because {stop_reason}." if stop_reason else "."),
         "",
         "## Score",
         "",
-        f"**{score.total:.1f} / 100** (threshold {threshold:.0f})",
+        headline,
         "",
         "> This number is a **local proxy**. No employer computes it: Greenhouse and Lever do not",
         "> rank by keyword at all, and Taleo/iCIMS keyword search happens recruiter-side. Treat it",
@@ -78,6 +122,7 @@ def build(
         "",
         *_table(score),
         "",
+        *_ceiling_note(score, ceiling, threshold),
     ]
 
     if verify_report is not None:
