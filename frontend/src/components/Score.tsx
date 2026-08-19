@@ -13,9 +13,11 @@ const STOP_REASON: Record<string, string> = {
 /**
  * The score, as a breakdown and never as a bare number.
  *
- * No employer computes this. Greenhouse and Lever do not rank by keyword at all; Taleo and
- * iCIMS keyword search happens recruiter-side. It is a stopping rule for the rewrite loop,
- * and printing it alone would invite exactly the misreading the caveat exists to prevent.
+ * Nothing reproduces this. Several ATS platforms do score a résumé now — Greenhouse Talent
+ * Matching, Lever Talent Fit, Workday, Ashby — but each scores against an employer's own
+ * calibration nobody outside can see, and each is documented as advisory input to a human.
+ * It is a stopping rule for the rewrite loop, and printing it alone would invite exactly the
+ * misreading the caveat exists to prevent.
  */
 export function ScorePanel({ score }: { score: ScoreRecord }) {
   // A run recorded before the ceiling existed has no ceiling to show, which is the same
@@ -53,9 +55,10 @@ export function ScorePanel({ score }: { score: ScoreRecord }) {
       </div>
 
       <p class="caveat">
-        A <strong>local proxy</strong>, not a metric any employer computes. Because the grounding
-        gate blocks invention, the loop cannot raise this by making things up — so a low ceiling
-        means the role wants things your record does not have.
+        A <strong>local proxy</strong>, and nothing reproduces it — the ATS scores that do exist
+        run on an employer's own calibration you cannot see. Because the grounding gate blocks
+        invention, the loop cannot raise this by making things up, so a low ceiling means the role
+        wants things your record does not have.
       </p>
 
       {ceiling !== null && !reachable && (

@@ -94,9 +94,16 @@ things you would defend in an interview.
 
 ## About the score
 
-The number in `report.md` is a **local proxy**, not a metric any employer computes. Greenhouse and
-Lever do not rank by keyword at all; Taleo and iCIMS do recruiter-side keyword search. It is a
-stopping rule for the rewrite loop, printed as a weighted breakdown and never as a bare number.
+The number in `report.md` is a **local proxy**, and nothing reproduces it. It is a stopping rule
+for the rewrite loop, printed as a weighted breakdown and never as a bare number.
+
+Several ATS platforms *do* score a résumé — Greenhouse shipped Talent Matching in September 2025,
+Lever shipped Talent Fit in June 2025, and Workday, Ashby and iCIMS all score. This README used to
+say they did not, which was true when it was written. What is still true, and sharper: each of
+those scores is computed against an employer's own calibration you cannot see, each is documented
+as advisory input to a human, and **no vendor documents auto-rejection on résumé content** — every
+documented automatic rejection fires on structured application-question answers. Jobscan-style
+"match scores" have no validated standing anywhere, and neither does this one.
 
 Because the validator blocks invention, the loop **cannot raise its score by making things up**. A
 low ceiling is therefore information: the role genuinely wants things you have not done yet, and

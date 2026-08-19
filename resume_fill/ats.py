@@ -2,12 +2,14 @@
 
 Read this before adding a check.
 
-Most published "ATS rules" are folklore. There is no score an employer computes (PLAN.md
-§2): Greenhouse and Lever parse a résumé into fields for recruiter search and do not rank by
-keyword at all; Taleo and iCIMS support recruiter-side keyword search; Workday and
-SuccessFactors run their own matching over what their parser extracted. What every one of
-them has in common is the *parser*, and that is the only place a formatting decision has a
-demonstrable effect. So the rule for adding a check here is:
+Most published "ATS rules" are folklore. Several platforms *do* score a résumé now —
+Greenhouse Talent Matching (2025), Lever Talent Fit (2025), Workday, Ashby, iCIMS — but each
+scores against an employer's own calibration that nobody outside can see or reproduce, and
+each documents the result as advisory input to a human. So a checker that claimed to predict
+one would be lying.
+
+What every one of them has in common is the *parser*, and that is the only place a formatting
+decision has a demonstrable effect. So the rule for adding a check here is:
 
   it must be about something a parser or a human reviewer demonstrably does with the
   document, not about a number somebody claims a machine assigns to it.
@@ -78,9 +80,14 @@ FIRST_PERSON = re.compile(r"(?<![a-z])(?:i|me|my|mine|myself|we|our|us)(?![a-z])
 # Two rendered lines at 10.5pt on a Letter page with 0.5in margins. Past this a bullet wraps
 # to a third line and stops being scannable, which is the only thing a bullet is for.
 MAX_BULLET_CHARS = 240
-# Below this a page of bullets reads as a list of duties rather than a record of outcomes.
-# Not a hard number anybody publishes — it is the share at which the *unquantified* bullets
-# start looking like the exception rather than the rule.
+# A HOUSE CONVENTION, and labelled as one on purpose.
+#
+# Every university career office and every study says "quantify where you can". Not one of
+# them specifies a fraction, and a search for a source for any particular ratio comes back
+# empty — so this number is a choice, not a finding, and the check that reads it is advisory
+# for exactly that reason. It is the share at which the *unquantified* bullets start looking
+# like the exception rather than the rule, which is a judgement, and it is stated as one
+# wherever the user sees it.
 MIN_QUANTIFIED = 0.4
 
 
@@ -285,7 +292,9 @@ def check_quantified(doc: ResumeDoc) -> Check:
         kind="reading",
         fix="Prefer the recorded highlights that have numbers in them. The gate will not let "
             "a figure be invented, so this is a selection problem, not a writing one — and if "
-            "the record has no numbers anywhere, that is the thing to go and fix.",
+            "the record has no numbers anywhere, that is the thing to go and fix. The "
+            f"{MIN_QUANTIFIED:.0%} bar is this tool's convention, not a published finding: the "
+            "advice everyone actually gives is \"quantify where you can\".",
     )
 
 

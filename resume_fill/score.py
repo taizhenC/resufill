@@ -1,11 +1,25 @@
 """The local proxy score, and the gap list that is the actually useful output.
 
-Read PLAN.md §2 before trusting this number. **No employer computes it.** Greenhouse and
-Lever do not rank by keyword at all — they parse a résumé into fields for recruiter search.
-Taleo and iCIMS do keyword search, recruiter-side. Jobscan-style "match scores" are vendor
-heuristics with no standing anywhere. So this is a stopping rule for the auto-iterate loop
-and a way to see what a posting asked for that the record cannot answer. It is not a
-prediction about anything.
+Read PLAN.md §2 before trusting this number. **Nothing reproduces it**, which is a narrower
+claim than this file used to make and the only one still true.
+
+The old wording — "Greenhouse and Lever do not rank by keyword at all" — was correct when it
+was written and is not any more. Greenhouse shipped Talent Matching in September 2025, which
+scores a résumé Strong/Good/Partial/Limited and highlights the matched terms; Lever shipped
+Talent Fit in June 2025, which ranks résumés against the posting with an LLM. Workday, Ashby
+and iCIMS score too.
+
+What survives, and is sharper for having been corrected:
+
+  - No vendor documents auto-rejection on résumé *content*. Every documented automatic
+    rejection fires on structured application-question answers, not on prose.
+  - The scores that do exist are computed from the employer's own calibration, which the
+    candidate cannot see, and are documented as advisory input to a human reviewer.
+  - No third-party tool reproduces any of them. Jobscan-style "match scores" — and this one —
+    have no validated standing anywhere.
+
+So this is a stopping rule for the auto-iterate loop and a way to see what a posting asked
+for that the record cannot answer. It is not a prediction about anything.
 
 Every component is therefore printed as a breakdown with its own explanation, never as a
 bare number, and the weights are the ones written down in PLAN.md §4 rather than tuned

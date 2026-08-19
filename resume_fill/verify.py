@@ -1,11 +1,16 @@
 """The round trip: read the text back out of the PDF that was just produced, and fail the
 build if it did not survive.
 
-This is the guarantee that actually matters (PLAN.md §2). There is no ATS score an employer
-sees — Greenhouse and Lever do not rank by keyword at all, they parse into fields for
-recruiter search — so the number in report.md is an explicitly-labelled local proxy. What
-is *not* a proxy is whether the document parses. If a bullet is not in the text layer, no
-system on the other side will ever see it, and the résumé silently loses whatever it said.
+This is the guarantee that actually matters (PLAN.md §2). Several ATS platforms now do score
+a résumé — Greenhouse Talent Matching, Lever Talent Fit, Workday, Ashby, iCIMS — but every
+one of those scores is computed from an employer's own calibration that the candidate cannot
+see, and nothing reproduces them, so the number in report.md remains an explicitly-labelled
+local proxy.
+
+What is *not* a proxy is whether the document parses. Every one of those systems, and every
+recruiter search behind them, runs on what their parser extracted: if a bullet is not in the
+text layer, no system on the other side will ever see it, and the résumé silently loses
+whatever it said.
 
 A PDF's text layer is not its markup, which is why this cannot be checked against the HTML:
 a two-column header reorders, a webfont can fail to embed, a ligature can arrive as a glyph
