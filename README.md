@@ -4,9 +4,10 @@ A local CLI that turns a canonical record of your career into a job-specific ré
 letter, and drafts LinkedIn profile copy from your blog.
 
 **Nothing it writes is invented.** Every bullet carries the id of the source it came from, and a
-validator rejects the document if a claim cannot be traced back to `profile.yaml` or the evidence
-corpus. Keywords the job description wants but your record cannot support are reported as **gaps**,
-never quietly inserted.
+validator rejects any claim that cannot be traced back to `profile.yaml` or the evidence corpus —
+cutting the unsupported sentence and keeping the rest, rather than throwing the whole draft away and
+spending an iteration re-earning what was already fine. Keywords the job description wants but your
+record cannot support are reported as **gaps**, never quietly inserted.
 
 See [PLAN.md](PLAN.md) for the design, the decisions, and what building it turned up.
 
@@ -58,8 +59,10 @@ Opens `http://127.0.0.1:8765`. Same pipeline, same `out/` directory, same `profi
 server is a thin JSON API over the library the CLI already uses, so a run started in either
 place is indistinguishable afterwards.
 
-It covers the generate loop only: paste a posting, pick a mode, watch each stage as it happens,
-then read the score breakdown and gap list with the PDFs rendered inline. `init`, `blog sync` and
+It covers the generate loop only. Paste a posting and it previews what that posting wants before
+you spend anything; pick a mode and watch each stage as it happens, with the running cost beside it;
+then read the score breakdown, the machine-readability rubric and the gap list, with the PDFs
+rendered inline. Past runs are listed straight out of `out/`. `init`, `blog sync` and
 `linkedin draft` stay on the command line — they run once, and `init` exists to produce a file you
 then correct by hand in an editor.
 
@@ -75,9 +78,10 @@ Output lands in `out/<company>-<role>-<date>/`:
 | File | What it is |
 |---|---|
 | `resume.pdf`, `cover_letter.pdf` | The documents |
-| `resume.json` | The intermediate — kept so two runs can be diffed |
-| `report.md` | Score breakdown, gap list, and a citation for every bullet |
-| `resume.html` | What was handed to Chromium, for when a bullet fails the parse check |
+| `resume.json`, `cover_letter.json` | The intermediate — kept so two runs can be diffed |
+| `report.md` | Score, machine-readability rubric, gap list, and a citation for every bullet |
+| `run.json` | The same run, machine-readable: score, ceiling, stop reason, cost. The browser's history reads it |
+| `resume.html`, `cover_letter.html` | What was handed to Chromium, for when a bullet fails the parse check |
 
 ## `profile.yaml` is the point
 
@@ -127,6 +131,23 @@ failure — every build extracts the text back out of the file it just produced 
 contact block, every section heading and every bullet survived the round trip. That is the
 guarantee that actually matters.
 
+### Machine-readability
+
+What the platforms above *do* share is the **parser**, and that is the only place a formatting
+decision has a demonstrable effect. So `ats.py` checks the document against a rubric of things a
+parser or a human reviewer demonstrably does with it, never against a number somebody claims a
+machine assigns to it. `report.md` prints it check by check and the browser shows it as a panel.
+It is also the `format` component of the score — which is how a failed check reaches the rewrite
+loop, instead of only the person reading the report.
+
+### The cover letter
+
+The grounding gate runs on the letter too, so `ground.py` answers "is any of this false?".
+`letter_review.py` answers the other question, which is the one that actually gets letters thrown
+away: **is any of this worth reading?** An "I am writing to express my interest in the X position"
+opening, the tells of a template, no specific evidence. A letter that reads as a form gets rewritten
+rather than shipped, and `report.md` says how the one you got reads under **How it reads**.
+
 ### Where the rules come from
 
 [`docs/research/ats-and-cover-letters.md`](docs/research/ats-and-cover-letters.md) is the brief the
@@ -140,6 +161,20 @@ what its sources say — including **the checks that turned out to rest on nothi
 the opposite direction from the obvious one. The other lists the widely-repeated claims that could
 not be verified, so nobody re-derives them later and assumes somebody checked.
 
+## What a run costs
+
+The loop is the expensive part of this tool, and it used to be the invisible part. "Iterations: 3"
+tells you nothing, because an iteration is a model call plus a Chromium launch plus a PDF parse and
+none of those cost the same. So every run counts its own model calls, tokens and wall time:
+`report.md` prints it on the header line, `run.json` keeps it, and the browser shows it accumulating
+while the run is still going. It is what makes the stopping rules tunable — "stopped at the ceiling
+after one attempt" and "used its whole budget of four" are two similar lines in a log and two very
+different amounts of money.
+
+Deliberately not a figure in dollars. Rates differ per provider and change without notice, and a
+stale multiplier printed to two decimal places would be worse than no number at all. Tokens and
+calls are facts; dollars would be a guess wearing a dollar sign.
+
 ## LinkedIn
 
 Draft-and-paste, by design. LinkedIn has no public write API for profile fields, and automating the
@@ -150,7 +185,7 @@ client, no session and no credentials, and a test asserts that against its sourc
 ## Development
 
 ```bash
-uv run pytest        # 316 tests
+uv run pytest        # 377 tests
 uv run ruff check .
 ```
 
