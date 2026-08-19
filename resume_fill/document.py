@@ -58,6 +58,14 @@ class ResumeDoc(BaseModel):
     def bullet_text(self) -> str:
         return "\n".join(bullet.text for _, bullet in self.bullets())
 
+    def is_empty(self) -> bool:
+        """No entries, or entries with nothing under them.
+
+        A document can reach this state by being repaired down to nothing, and an empty
+        résumé is not a smaller résumé — it is a failed run wearing a PDF.
+        """
+        return not any(entry.bullets for _, entries in self.entry_groups() for entry in entries)
+
     def skill_list(self) -> list[str]:
         return [skill for group in self.skills.values() for skill in group]
 

@@ -44,6 +44,22 @@ export function DocumentPanel({ runId, document }: { runId: string; document: Do
         </div>
       )}
 
+      {(document.removed ?? []).length > 0 && (
+        <div class="gap-group">
+          <h3>Removed so the rest could be kept</h3>
+          <p class="field-hint">
+            The draft claimed these and the record could not back them, so they were cut and what
+            remained went back through the same gate. This document is shorter than the one the
+            model wrote — that is the trade, and it is said here rather than absorbed silently.
+          </p>
+          <ul class="gap-list">
+            {document.removed.map((item) => (
+              <li key={item}>{item}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       {document.blocked_terms.length > 0 && (
         <div class="gap-group">
           <h3>Blocked by the grounding gate</h3>

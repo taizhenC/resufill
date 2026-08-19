@@ -3,7 +3,7 @@ import json
 import pytest
 from conftest import needs_chromium
 from test_cover import LETTER
-from test_pipeline import FABRICATED, HONEST
+from test_pipeline import HONEST, UNSALVAGEABLE
 
 from resume_fill.cli import main
 
@@ -73,7 +73,7 @@ def test_gen_writes_the_pdf_the_json_and_the_report(wired, capsys):
 
 @needs_chromium
 def test_gen_exits_nonzero_when_nothing_could_be_grounded(wired, capsys):
-    wired["responses"].append(FABRICATED)
+    wired["responses"].append(UNSALVAGEABLE)
     code = main(["gen", "--jd", wired["jd"], "--out", str(wired["tmp_path"] / "run"),
                  "--resume", "--max-iter", "1"])
 

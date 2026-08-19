@@ -94,6 +94,11 @@ class DocumentRecord(BaseModel):
     claims: list[Claim] = Field(default_factory=list)
     blocked_terms: list[str] = Field(default_factory=list)
     violations: list[str] = Field(default_factory=list)
+    # What the gate removed from the draft so the rest could be kept. The document below is
+    # smaller than the model wrote, and this is the difference — recorded rather than
+    # silently absorbed, because "the résumé is shorter than you expected" is a question
+    # somebody will ask, and this is the answer.
+    removed: list[str] = Field(default_factory=list)
 
 
 class JobRecord(BaseModel):

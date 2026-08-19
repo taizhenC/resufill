@@ -7,15 +7,23 @@ reasons attached.
                   │                 └────────┴────────┘
     job_desc.txt ─┘        retry with violations + gaps
 
-Two rules make the loop worth having rather than just expensive:
+Three rules make the loop worth having rather than just expensive:
 
-  1. A draft that fails grounding never gets rendered. Launching Chromium to produce a PDF
-     of claims that are about to be rejected wastes a second per iteration and produces an
+  1. A rejection costs what it should cost, and no more. A draft that fails grounding is
+     first repaired — the unsupportable parts are cut out and the remainder goes back
+     through the same gate — because one bad token in one bullet is not a reason to throw
+     away the other fifteen and an LLM call with them. Only a draft with nothing
+     supportable left in it is dropped, and that one is never rendered: launching Chromium
+     for claims that are about to be rejected wastes a second per iteration and produces an
      artefact nobody should look at.
 
-  2. The best attempt is kept, not the last one. Iteration 4 can score worse than
+  2. What gets cut is fed back anyway. A repaired document is grounded but smaller, and the
+     next attempt should be one that needs no cutting.
+
+  3. The best attempt is kept, not the last one. Iteration 4 can score worse than
      iteration 2 — the feedback pushes on gaps, and pushing can cost coverage elsewhere —
-     and silently shipping the final draft would make more iterations actively harmful.
+     and silently shipping the final draft would make more iterations actively harmful. At
+     equal score an untouched draft beats a repaired one.
 """
 
 from __future__ import annotations
@@ -40,6 +48,7 @@ from .progress import (
     GROUNDING,
     REJECTED,
     RENDERING,
+    REPAIRED,
     SCORED,
     SCORING,
     TAILORING,
@@ -59,30 +68,49 @@ class Attempt:
     number: int
     doc: ResumeDoc
     violations: list[ground.Violation] = field(default_factory=list)
+    # Set when the draft failed the gate and removing the failing parts left a document
+    # that passes it. `doc` stays as the model wrote it; `document` is what got rendered.
+    repair: ground.Repair | None = None
     score: Score | None = None
     verify_report: VerifyReport | None = None
     rendered: Rendered | None = None
 
     @property
+    def document(self) -> ResumeDoc:
+        """What was actually rendered and scored."""
+        return self.repair.doc if self.repair is not None else self.doc
+
+    @property
     def grounded(self) -> bool:
+        """True of the *rendered* document. A repaired one is grounded in the full sense —
+        it went through check() a second time and came back clean."""
         return not self.violations
+
+    @property
+    def repaired(self) -> bool:
+        return self.repair is not None
 
     @property
     def total(self) -> float:
         return self.score.total if self.score else -1.0
 
     def rank(self) -> tuple:
-        """Grounded beats ungrounded; parsing beats not parsing; then the score."""
+        """Grounded beats ungrounded; parsing beats not parsing; then the score; and an
+        untouched draft beats a repaired one that scored the same, because the repaired one
+        is the same document with something cut out of it."""
         return (
             self.grounded,
             bool(self.verify_report and self.verify_report.ok),
             self.total,
+            not self.repaired,
         )
 
     def note(self) -> str:
         if self.violations:
             return f"rejected by the grounding gate ({ground.summarize(self.violations)})"
         parts = [f"score {self.total:.1f}"]
+        if self.repair is not None:
+            parts.append(f"repaired: dropped {self.repair.summary()}")
         if self.verify_report:
             parts.append("PDF parses" if self.verify_report.ok else "PDF failed its checks")
             parts.append(f"{self.verify_report.page_count} page(s)")
@@ -148,6 +176,7 @@ def generate(
 
     for number in range(1, total + 1):
         where = {"document": "resume", "attempt": number, "attempts": total}
+        repair_feedback = ""
         try:
             report(TAILORING, **where)
             doc = tailor(
@@ -161,21 +190,36 @@ def generate(
 
             if attempt.violations:
                 blocked = list(dict.fromkeys(blocked + ground.unsupported_terms(attempt.violations)))
-                feedback = ground.feedback(attempt.violations)
-                report(REJECTED, **where, reason=ground.summarize(attempt.violations))
-                continue
+                # A rejection used to end the iteration here, throwing away every bullet in
+                # the draft over whichever one could not be supported. Cut the failing parts
+                # out instead and see whether what is left still passes the same gate.
+                salvaged = ground.repair(doc, profile, index, attempt.violations)
+                if not salvaged.ok:
+                    feedback = ground.feedback(attempt.violations)
+                    report(REJECTED, **where, reason=ground.summarize(attempt.violations))
+                    continue
+                attempt.repair = salvaged
+                attempt.violations = []
+                # Still fed back: the next attempt should write a document that does not
+                # need cutting, and the removed bullets are the specific reason why.
+                repair_feedback = ground.feedback(salvaged.dropped)
+                report(REPAIRED, **where, reason=salvaged.summary(), dropped=len(salvaged.dropped))
+
+            rendered_doc = attempt.document
 
             report(RENDERING, **where)
-            attempt.rendered = render_resume(doc, profile, out_dir, cfg)
+            attempt.rendered = render_resume(rendered_doc, profile, out_dir, cfg)
 
             report(VERIFYING, **where)
             attempt.verify_report = verify(
-                attempt.rendered.pdf_path, doc, profile,
+                attempt.rendered.pdf_path, rendered_doc, profile,
                 max_pages=cfg.RESUME_MAX_PAGES, page_count=attempt.rendered.page_count,
             )
 
             report(SCORING, **where)
-            attempt.score = score_module.score(doc, profile, jd, index, attempt.verify_report)
+            attempt.score = score_module.score(
+                rendered_doc, profile, jd, index, attempt.verify_report
+            )
             report(
                 SCORED, **where, score=attempt.score.total,
                 parses=attempt.verify_report.ok, pages=attempt.verify_report.page_count,
@@ -188,23 +232,36 @@ def generate(
                 raise
             break
 
+        # Repaired or not: the document that exists is grounded, parses and clears the
+        # threshold. Spending another LLM call hoping for an uncut version of the same score
+        # is what made this loop expensive, and rank() already prefers the uncut one when
+        # both exist.
         if attempt.verify_report.ok and attempt.score.total >= cfg.SCORE_THRESHOLD:
             break
-        feedback = score_module.feedback(attempt.score, cfg.SCORE_THRESHOLD, attempt.verify_report)
+        feedback = "\n\n".join(
+            part
+            for part in (
+                repair_feedback,
+                score_module.feedback(attempt.score, cfg.SCORE_THRESHOLD, attempt.verify_report),
+            )
+            if part
+        )
 
     best = max(attempts, key=lambda a: a.rank())
 
     # The last attempt rendered is the one sitting on disk. If it was not the best one,
     # render the best again so the PDF matches the report that describes it.
     if best.grounded and best is not attempts[-1]:
-        best.rendered = render_resume(best.doc, profile, out_dir, cfg)
+        best.rendered = render_resume(best.document, profile, out_dir, cfg)
         best.verify_report = verify(
-            best.rendered.pdf_path, best.doc, profile,
+            best.rendered.pdf_path, best.document, profile,
             max_pages=cfg.RESUME_MAX_PAGES, page_count=best.rendered.page_count,
         )
 
+    # The rendered document, not the drafted one: if repair cut a bullet, resume.json has to
+    # match the PDF sitting next to it or a diff of two runs compares fiction.
     (out_dir / "resume.json").write_text(
-        json.dumps(best.doc.model_dump(), indent=2, ensure_ascii=False), encoding="utf-8"
+        json.dumps(best.document.model_dump(), indent=2, ensure_ascii=False), encoding="utf-8"
     )
     result = RunResult(
         out_dir=out_dir, attempts=attempts, best=best, report_path=out_dir / "report.md",
@@ -224,8 +281,9 @@ def resume_report(
 ) -> str:
     best = result.best
     return report_module.build(
-        doc=best.doc, profile=profile, jd=jd, index=index,
-        score=best.score or score_module.score(best.doc, profile, jd, index),
+        doc=best.document, profile=profile, jd=jd, index=index,
+        removed=best.repair.notes() if best.repair else [],
+        score=best.score or score_module.score(best.document, profile, jd, index),
         verify_report=best.verify_report, iterations=len(result.attempts),
         threshold=cfg.SCORE_THRESHOLD, blocked_terms=result.blocked_terms,
         violations=best.violations,
@@ -240,19 +298,31 @@ class CoverAttempt:
     number: int
     letter: CoverLetter
     violations: list[ground.Violation] = field(default_factory=list)
+    repair: ground.LetterRepair | None = None
     verify_report: VerifyReport | None = None
     rendered: Rendered | None = None
 
     @property
+    def document(self) -> CoverLetter:
+        return self.repair.letter if self.repair is not None else self.letter
+
+    @property
     def grounded(self) -> bool:
         return not self.violations
+
+    @property
+    def repaired(self) -> bool:
+        return self.repair is not None
 
     def note(self) -> str:
         if self.violations:
             return f"letter rejected by the grounding gate ({ground.summarize(self.violations)})"
         pages = self.verify_report.page_count if self.verify_report else "?"
         parses = self.verify_report.ok if self.verify_report else False
-        return f"letter {'parses' if parses else 'failed its checks'}, {pages} page(s)"
+        note = f"letter {'parses' if parses else 'failed its checks'}, {pages} page(s)"
+        if self.repair is not None:
+            note += f", {len(self.repair.dropped)} paragraph(s) removed"
+        return note
 
 
 @dataclass
@@ -293,6 +363,7 @@ def generate_cover(
 
     for number in range(1, total + 1):
         where = {"document": "cover_letter", "attempt": number, "attempts": total}
+        repair_feedback = ""
         try:
             report(TAILORING, **where)
             letter = cover.write(profile, jd, corpus, cfg, llm_call, feedback=feedback)
@@ -303,21 +374,34 @@ def generate_cover(
             attempts.append(attempt)
             if attempt.violations:
                 blocked = list(dict.fromkeys(blocked + ground.unsupported_terms(attempt.violations)))
-                feedback = ground.feedback(attempt.violations)
-                report(REJECTED, **where, reason=ground.summarize(attempt.violations))
-                continue
+                salvaged = ground.repair_letter(
+                    letter, profile, index, attempt.violations, allowed_terms=allowed
+                )
+                if not salvaged.ok:
+                    feedback = ground.feedback(attempt.violations)
+                    report(REJECTED, **where, reason=ground.summarize(attempt.violations))
+                    continue
+                attempt.repair = salvaged
+                attempt.violations = []
+                repair_feedback = ground.feedback(salvaged.dropped)
+                report(
+                    REPAIRED, **where, reason=ground.summarize(salvaged.dropped),
+                    dropped=len(salvaged.dropped),
+                )
+
+            written = attempt.document
 
             report(RENDERING, **where)
-            attempt.rendered = render_cover_letter(letter, profile, out_dir, cfg)
+            attempt.rendered = render_cover_letter(written, profile, out_dir, cfg)
 
             report(VERIFYING, **where)
             attempt.verify_report = verify_letter(
-                attempt.rendered.pdf_path, letter, profile,
+                attempt.rendered.pdf_path, written, profile,
                 max_pages=cfg.COVER_LETTER_MAX_PAGES, page_count=attempt.rendered.page_count,
             )
             report(
                 SCORED, **where, parses=attempt.verify_report.ok,
-                pages=attempt.verify_report.page_count, words=letter.word_count(),
+                pages=attempt.verify_report.page_count, words=written.word_count(),
             )
         except Cancelled:
             cancelled = True
@@ -325,21 +409,28 @@ def generate_cover(
                 raise
             break
 
-        if attempt.verify_report.ok:
+        if attempt.verify_report.ok and not attempt.repaired:
             break
-        feedback = "The rendered PDF failed its checks:\n" + "\n".join(
-            f"  - {item}" for item in attempt.verify_report.missing[:10]
-        )
+        parts = [repair_feedback] if repair_feedback else []
+        if not attempt.verify_report.ok:
+            parts.append(
+                "The rendered PDF failed its checks:\n"
+                + "\n".join(f"  - {item}" for item in attempt.verify_report.missing[:10])
+            )
+        feedback = "\n\n".join(parts)
 
-    best = max(attempts, key=lambda a: (a.grounded, bool(a.verify_report and a.verify_report.ok)))
+    best = max(
+        attempts,
+        key=lambda a: (a.grounded, bool(a.verify_report and a.verify_report.ok), not a.repaired),
+    )
     if best.grounded and best is not attempts[-1]:
-        best.rendered = render_cover_letter(best.letter, profile, out_dir, cfg)
+        best.rendered = render_cover_letter(best.document, profile, out_dir, cfg)
         best.verify_report = verify_letter(
-            best.rendered.pdf_path, best.letter, profile,
+            best.rendered.pdf_path, best.document, profile,
             max_pages=cfg.COVER_LETTER_MAX_PAGES, page_count=best.rendered.page_count,
         )
     (out_dir / "cover_letter.json").write_text(
-        json.dumps(best.letter.model_dump(), indent=2, ensure_ascii=False), encoding="utf-8"
+        json.dumps(best.document.model_dump(), indent=2, ensure_ascii=False), encoding="utf-8"
     )
     return CoverRun(attempts=attempts, best=best, blocked_terms=blocked, cancelled=cancelled)
 
@@ -452,9 +543,10 @@ def build_record(
                 ok=result.resume.ok,
                 iterations=len(result.resume.attempts),
                 verify=runrecord.verify_record(best.verify_report),
-                claims=runrecord.resume_claims(best.doc, index),
+                claims=runrecord.resume_claims(best.document, index),
                 blocked_terms=list(result.resume.blocked_terms),
                 violations=[str(v) for v in best.violations],
+                removed=best.repair.notes() if best.repair else [],
             )
         )
     if result.cover is not None:
@@ -466,9 +558,14 @@ def build_record(
                 ok=result.cover.ok,
                 iterations=len(result.cover.attempts),
                 verify=runrecord.verify_record(best_cover.verify_report),
-                claims=runrecord.cover_claims(best_cover.letter, index),
+                claims=runrecord.cover_claims(best_cover.document, index),
                 blocked_terms=list(result.cover.blocked_terms),
                 violations=[str(v) for v in best_cover.violations],
+                removed=(
+                    [f"{v.where} — {v.detail}" for v in best_cover.repair.dropped]
+                    if best_cover.repair
+                    else []
+                ),
             )
         )
 
