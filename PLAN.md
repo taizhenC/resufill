@@ -143,11 +143,22 @@ Built as planned, plus five modules the plan implied but did not name:
 | `pipeline.py` | The loop, and `run()` for the three modes |
 | `bootstrap.py`, `evidence.py`, `cover.py` | The `init` merge, the corpus reader, and the letter |
 
+Plus three from the second round (§12), each of which exists because a question the tool was
+answering implicitly deserved a module that could be read and argued with:
+
+| Module | The question it answers |
+|---|---|
+| `ats.py` | Which formatting claims are checkable, and which are folklore. The docstring names what is deliberately *not* checked, which is the harder half |
+| `letter_review.py` | Whether a cover letter is worth reading, as opposed to whether it is true — `ground.py` already owns the second |
+| `meter.py` | What a run cost. Tokens and calls, never currency |
+
 ## 6. CLI surface
 
 ```bash
 resume-fill init                          # bootstrap profile.yaml from LinkedIn export + résumé PDF
 resume-fill blog sync                     # refresh the evidence corpus from the blog
+
+resume-fill preview --jd jd.txt           # what the posting wants vs what the record has — free
 
 resume-fill gen --jd jd.txt --resume      # mode 1: résumé only
 resume-fill gen --jd jd.txt --cover       # mode 2: cover letter only
@@ -162,6 +173,10 @@ resume-fill doctor                        # config, sources and the PDF toolchai
 `--max-iter`, `--threshold`, `--pages` and `--strict`; every one of them defaults to the
 corresponding `.env` setting.
 
+`preview` calls no model at all (§12f). It is the deterministic lexicon pass plus the
+ceiling, both of which depend on the posting and the record rather than on anything a model
+writes.
+
 ## 7. Config (`.env`)
 
 ```
@@ -172,6 +187,8 @@ LLM_MODEL=qwen-3-235b-a22b-instruct         # or deepseek-v4-flash
 BLOG_URL=
 SCORE_THRESHOLD=80
 MAX_ITER=4
+CEILING_SLACK=2.0          # stop this close to what the record can reach (§12c)
+MIN_GAIN=1.5               # a rewrite gaining less than this is noise
 ```
 
 ---
@@ -257,3 +274,136 @@ an unrelated-looking error.
 on a document you may already have sent. Closing a gap means editing `profile.yaml`; if the audit
 re-read the record it would silently start showing a source that no longer says what it said. It
 would render, it would be wrong, and nothing would say so.
+
+---
+
+## 12. The loop was too expensive, and the documents were only checked for truth
+
+A second round, after using it. Two complaints, and they turned out to have the same shape:
+**the tool was strict about the wrong things and silent about the rest.**
+
+### 12a. What a rejection cost
+
+`ground.check()` answered "may this be rendered?" with yes or no, and no threw away the
+whole document. One unsupportable token in one bullet cost the other fifteen, the render,
+and an LLM call — and at `MAX_ITER=4`, three unlucky drafts produced no résumé at all.
+
+| Decision | Chosen | Why |
+|---|---|---|
+| A failed draft | **repair, then re-check** | Cut out the parts that failed and put what is left through the *same* gate. Removal only: nothing is rewritten or substituted, and `.ok` means `check()` came back clean on the smaller document |
+| A draft with nothing left | still rejected, still not rendered | An empty résumé is a failed run wearing a PDF |
+| A repaired cover letter | floor of two paragraphs | Cutting one out of four removes a quarter of the letter; past a point the honest move is to write it again |
+| What was cut | **printed** — `report.md`, `run.json`, the CLI, the run view | A résumé shorter than the model drafted is a question somebody will ask, and absorbing the difference silently is the one way repair could be dishonest |
+
+**The gate did not move.** `tests/test_repair.py` exists to say so, and the old hard-block
+tests still run against a fixture where every bullet is fabricated — the case repair
+genuinely cannot help.
+
+### 12b. What the gate rejected drafts *for*
+
+Some of it was spelling. A bullet saying **Postgres** against a record saying **PostgreSQL**,
+or **CI/CD** against a highlight saying *continuous integration*, is the same fact written
+differently — and each rejection cost a full iteration to relitigate an alias.
+
+Worse, it contradicted the tailor: rule 9 of that prompt asks the model to write in the
+posting's vocabulary, and then the gate punished it for complying.
+
+`supported_term()` now tries the literal spelling, the other names for the same concept
+(`lexicon.EXPANSIONS`), the word a derived form was built from, and — against the cited
+source only — the conjugations of the term itself. Nothing new may be claimed; every
+accepted spelling still has to resolve to something written down. The rule for adding a pair
+is that it must be interchangeable **in both directions** with no loss, which is why "ML"
+for "machine learning" is in the table and "CV" for "computer vision" is deliberately not.
+
+### 12c. The stopping rule was frequently unsatisfiable
+
+A threshold of 80 against a record that tops out at 71.2 meant four tailor calls, four
+Chromium launches and four PDF round trips to arrive at what the first attempt already knew
+— then a report saying "below the threshold", which reads as a failure and is not one.
+
+`score.ceiling()` computes the highest score a perfect selection from the record could get
+against this posting, **before the first model call**, because it does not depend on what
+the model does. (It reproduces `HONEST_CEILING = 71.2`, a constant that had been measured by
+hand into the test suite.)
+
+| Stopping rule | Meaning |
+|---|---|
+| `threshold` | the score reached what was asked for |
+| `ceiling` | the score reached what this record can reach for this posting |
+| `plateau` | the rewrite gained less than `MIN_GAIN` over the best so far |
+
+A PDF that does not parse is still worth another attempt regardless of its score — that is
+the one thing this tool actually promises.
+
+**Stopping at the ceiling is honest rather than lazy, and Decision 5 is the reason.** The
+missing points are unreachable precisely because the only cheap way to close them is to
+invent the keyword, and the gate exists to stop that. If the loop could reach 80 there, it
+would already be cheating. The ceiling is deliberately *optimistic* — it assumes every
+keyword anywhere in the record could fit on one page — because that direction never stops
+the loop early on the grounds that something was impossible when it was merely hard.
+
+`--strict` changed meaning to match: it fails only when the threshold was **reachable** and
+the run missed it. Failing a run for missing a number that was never available would be
+scoring the candidate on experience nobody claimed they had.
+
+### 12d. Machine-readability, checked instead of asserted
+
+The `format` component was five hand-rolled booleans about bullet length. `ats.py` replaces
+it with a rubric, at the same weight, and — more importantly — with a written rule for what
+is allowed in it:
+
+> a check must be about something a parser or a human reviewer demonstrably does with the
+> document, not about a number somebody claims a machine assigns to it.
+
+Which splits the list in two, and the split is the point. **Parsing** failures (dates a
+parser cannot read, no email to key the record on, a heading it files under "other", a
+layout that reorders the text layer) mean the document is invisible on the other side.
+**Reading** failures (no figures, "responsible for", first-person pronouns) mean it is
+weaker to a person — advisory, always, because putting style advice behind this tool's one
+real guarantee would make that guarantee mean less by association.
+
+Listed in the module docstring so nobody adds them back: keyword-density targets, "match
+score" percentages, white-text injection, absolute length rules, and any claim that a font
+or a file name affects ranking.
+
+### 12e. The cover letter was only checked for truth
+
+`ground.py` asks whether any of it is false. Nothing asked whether any of it was worth
+reading — and a letter can pass the gate completely while opening *"I am writing to express
+my interest in the Backend Engineer position"*, which is the most common first line in the
+pile and the specific thing a reader is scanning for.
+
+Three findings recur across 2024–26 recruiter surveys, and all three are checkable, which is
+why `letter_review.py` is a module and not a longer prompt: a letter **is** read, often
+before the résumé; the opening sentence is where it is lost; and readers report recognising
+machine-written applications, naming a small stable vocabulary as the tell.
+
+Blocking (a rewrite reliably fixes it, so the loop retries): a formulaic opening, "To Whom
+It May Concern", a word count outside 150–420, fewer than three paragraphs, no figure and no
+tool anywhere in it, nothing the posting asked for appearing at all.
+
+Advisory: the machine-written vocabulary, praise aimed at the employer, every paragraph
+opening on "I", quoting the advert back at the person who wrote it.
+
+Deliberately not checked: tone, warmth, "passion" — anything needing an opinion about the
+candidate rather than a fact about the text. A letter that fails nothing here can still be a
+bad letter. That is a smaller claim than the module could have made, and a true one.
+
+### 12f. Two things that were free and were not being given away
+
+| Addition | Why |
+|---|---|
+| `resume-fill preview` and `POST /api/analyze` | The question people open the tool with is *"is this posting worth applying to, and what will it say I am missing?"* — and the two stages that answer it (the lexicon pass and the ceiling) have never needed a model. Running the whole loop to find out cost a minute and four calls for an answer that does not improve for having been paid for. A test asserts no model call happens, because "free" is the whole proposition and it is the kind of promise that quietly stops being true |
+| `meter.py` | "Iterations: 3" is not a price, and the three stopping rules above are a trade between spending and quality. A trade nobody can see the price of is a trade nobody can tune. Tokens and calls, never currency: rates differ per provider and change without notice, and a stale multiplier printed to two decimal places would be worse than no number |
+
+### 12g. What this round turned up
+
+| Finding | Consequence |
+|---|---|
+| **The tailor prompt and the grounding gate were arguing.** Rule 9 asks for the posting's vocabulary; the gate rejected the draft for using it whenever the record spelled the same concept differently. | `lexicon.EXPANSIONS` and `ground.supported_term()`. Every pair in the table is one that cost a whole iteration to relearn |
+| **Growing a tool name into a verb is far more dangerous than shrinking one.** `Spark` + `-ed` makes "sparked", which appears in ordinary prose; `Docker` + `-ised` does not. | The two derivation lists differ on purpose, and `-ed`/`-ing` are absent from the one that grows. There is a test named after "sparked a redesign" |
+| **`HONEST_CEILING = 71.2` had been measured by hand and written into the test suite.** `score.ceiling()` computes it. | The number stopped being a magic constant, which is also the strongest evidence the ceiling is calculated correctly |
+| **The honest draft sits exactly *at* the record's ceiling**, so it now ends the loop by itself — correct behaviour, and useless for testing iteration. | The loop-control tests use two deliberately-suboptimal drafts instead |
+| **`tailor()` has had an `extra_rules` parameter since M2 and nothing ever passed one.** | `ats.TAILOR_RULES` goes into the *first* prompt. Every rule in it is something the first draft could simply have done, and a retry costs a model call |
+| **The web UI's cover letter could be previewed and downloaded but not pasted**, which is how a cover letter is actually submitted most of the time. | A plain-text view and a copy button, with a `<textarea>` fallback — the clipboard API is not guaranteed on plain-HTTP localhost |
+| **A stubbed `complete_json` is not a provider**, so the API tests meter zero calls. | `test_meter.py` owns the arithmetic; the API test asserts only that the field is exposed, and says why in its docstring |
