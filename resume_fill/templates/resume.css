@@ -14,7 +14,16 @@
  *   - one column, no flex, no grid, no float, no absolute positioning;
  *   - no tables, no text boxes, no images, no icons;
  *   - dates live inline in the same run of text as the employer;
- *   - real text in a common font, never outlines or a webfont that might not embed.
+ *   - real text in a common font, never outlines or a webfont that might not embed;
+ *   - no letter-spacing, anywhere, and ligatures off.
+ *
+ * Those last two are the ones that look harmless. pdfminer inserts a space wherever the gap
+ * between two glyphs exceeds its word margin, so a tracked-out heading arrives in the text
+ * layer as "S K I L L S" — which Greenhouse lists *first* among the things that make a
+ * résumé unparseable ("the parser won't recognize the separate letters as a single word").
+ * And Chromium, printing to PDF, can emit the presentation-form codepoint for a ligature
+ * (issues.chromium.org/41432982), so "efficient" extracts as "e<U+FB03>cient" and a search
+ * for the whole word misses it. Neither is visible on the page. verify.py asserts both.
  *
  * verify.py extracts the text back out of every PDF this produces and fails the build if
  * the contact block, a heading or a bullet did not survive. These rules are what makes
@@ -34,6 +43,8 @@ body {
   /* A stack of fonts Chromium can always resolve locally. A webfont that fails to load
      silently substitutes, and one that loads may subset in ways that hurt extraction. */
   font-family: "Helvetica Neue", Helvetica, Arial, "Liberation Sans", sans-serif;
+  /* Off everywhere, not just where a ligature would be pretty. See the header. */
+  font-variant-ligatures: none;
   color: #000;
   /* Tight, because the entry header costs two lines per entry and the page budget is one
      page. Below about 1.2 the descenders start touching the next line's capitals. */
@@ -51,7 +62,9 @@ header {
 h1 {
   font-size: 1.65rem;
   font-weight: 700;
-  letter-spacing: 0.01em;
+  /* Was 0.01em. Nothing measured showed it splitting, but the name is the single field a
+     parser most needs and there is no version of this worth the risk. See the header. */
+  letter-spacing: 0;
   margin: 0 0 0.15em;
 }
 
@@ -69,7 +82,10 @@ h2 {
   font-size: 1rem;
   font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.06em;
+  /* Was 0.06em, which measured clean — but section headings are exactly what a parser uses
+     to decide where employment history begins, and the failure is silent. The uppercase and
+     the rule carry the emphasis instead. */
+  letter-spacing: 0;
   border-bottom: 0.75pt solid #000;
   margin: 0.55em 0 0.22em;
   padding-bottom: 0.08em;

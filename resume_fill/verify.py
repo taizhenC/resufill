@@ -31,6 +31,65 @@ from .textutil import normalize, truncate
 # have to come out before comparing, or every wrapped bullet reads as missing.
 _JOIN_HYPHEN = re.compile(r"[-­]\s*\n\s*")
 
+# --- three ways a text layer can survive extraction and still be unreadable ---------------
+#
+# The round trip below asserts the text is *there*. These assert it is *text*. All three are
+# silent: the PDF looks perfect, every bullet is present, and the words are not the words.
+
+# Presentation-form ligatures. When a font maps f+i to a ligature glyph and also maps U+FB01
+# to that same glyph, subsetting emits the U+FB01 mapping — so "efficient" extracts as
+# "e<U+FB03>cient" and a recruiter searching "efficient" does not find it. Chromium has this
+# bug when printing to PDF (issues.chromium.org/41432982); the documented workaround is to
+# turn ligatures off, which resume.css now does. This is the assertion that it worked.
+_LIGATURES = re.compile(r"[\ufb00-\ufb06]")
+
+# Private Use Area codepoints mean a glyph was drawn with no Unicode behind it — an icon
+# font, or a subset font with a broken ToUnicode CMap. Whatever it looks like on the page, a
+# parser reads it as nothing.
+_PRIVATE_USE = re.compile(r"[\ue000-\uf8ff]")
+
+# "S K I L L S". pdfminer inserts a space wherever the inter-glyph gap exceeds its word
+# margin, so a tracked-out heading arrives as separate letters. Greenhouse lists this
+# *first* among the things that make a résumé unparseable: "the parser won't recognize the
+# separate letters as a single word and can't make sense of the data."
+#
+# Five letters minimum. Four would catch "U S A" and an initialled name, which are ordinary
+# things to write and would fail a build for no reason.
+_SPACED_OUT = re.compile(r"(?<![A-Za-z])(?:[A-Za-z] ){4,}[A-Za-z](?![A-Za-z])")
+
+# How far into the extracted text the contact block may start. Textkernel raises a Major
+# Issue (code 311) for "a contact information section was found somewhere other than the top
+# of the resume" — the parser looks at the top, and a name that arrives after the first job
+# is a name the record may not get. Generous: it is a sanity check on reading order, not a
+# style rule.
+CONTACT_WITHIN_CHARS = 600
+
+
+def text_layer_artefacts(raw: str) -> list[str]:
+    """Ways the extracted text is corrupt even though every string survived.
+
+    Kept separate from the round trip because they answer a different question. The round
+    trip asks "did the bullet make it?"; this asks "is what made it actually the words?"
+    """
+    found: list[str] = []
+    if ligatures := set(_LIGATURES.findall(raw or "")):
+        found.append(
+            "ligature presentation forms in the text layer ("
+            + ", ".join(sorted(f"U+{ord(c):04X}" for c in ligatures))
+            + ") — a search for the whole word will not match it"
+        )
+    if private := set(_PRIVATE_USE.findall(raw or "")):
+        found.append(
+            f"{len(private)} private-use codepoint(s) — glyphs drawn with no Unicode behind "
+            "them, which a parser reads as nothing"
+        )
+    if spaced := _SPACED_OUT.findall(raw or ""):
+        found.append(
+            f"letters extracted separately ({spaced[0]!r}) — usually letter-spacing; a parser "
+            "cannot read it as a word"
+        )
+    return found
+
 
 @dataclass
 class VerifyReport:
@@ -97,6 +156,22 @@ def verify(
     if doc.summary.strip():
         require("summary", doc.summary)
 
+    # Where the contact block lands, not just whether it is there. A parser looks at the top.
+    position = haystack.find(flatten(profile.basics.name))
+    at_top = 0 <= position <= CONTACT_WITHIN_CHARS
+    checks["contact block is at the top"] = at_top
+    if not at_top:
+        missing.append(
+            f"contact block: the name appears {position} characters in, past the first "
+            f"{CONTACT_WITHIN_CHARS}"
+            if position >= 0
+            else "contact block: the name is not in the extracted text at all"
+        )
+
+    artefacts = text_layer_artefacts(raw)
+    checks["text layer is clean"] = not artefacts
+    missing.extend(artefacts)
+
     pages = page_count if page_count is not None else _count_pages(pdf_path)
     fits = pages <= max_pages
     checks["page_budget"] = fits
@@ -133,6 +208,10 @@ def verify_letter(
         checks[f"paragraph:{where}"] = present
         if not present:
             missing.append(f"{where}: {truncate(paragraph.text, 80)}")
+
+    artefacts = text_layer_artefacts(raw)
+    checks["text layer is clean"] = not artefacts
+    missing.extend(artefacts)
 
     pages = page_count if page_count is not None else _count_pages(pdf_path)
     checks["page_budget"] = pages <= max_pages

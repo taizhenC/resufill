@@ -12,6 +12,9 @@ html {
 }
 
 body {
+  /* See the header of resume.css: Chromium can emit a ligature's presentation-form
+     codepoint, and a letter pasted into a textarea carries it with it. */
+  font-variant-ligatures: none;
   font-family: "Helvetica Neue", Helvetica, Arial, "Liberation Sans", sans-serif;
   color: #000;
   line-height: 1.45;
