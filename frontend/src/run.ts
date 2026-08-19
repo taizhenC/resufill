@@ -1,7 +1,7 @@
 import { computed, signal } from "@preact/signals";
 
 import { api, ApiError } from "./api";
-import type { JobSnapshot, RunRecord, RunSummary, StageEvent } from "./types";
+import type { JobSnapshot, LoadedRun, RunSummary, StageEvent } from "./types";
 
 /** ~1s. Stages are seconds apart, so polling loses nothing a push would gain. */
 const POLL_MS = 1000;
@@ -9,7 +9,7 @@ const POLL_MS = 1000;
 export const job = signal<JobSnapshot | null>(null);
 /** Accumulated client-side: the server only sends what we have not seen. */
 export const events = signal<StageEvent[]>([]);
-export const record = signal<RunRecord | null>(null);
+export const record = signal<LoadedRun | null>(null);
 export const recordError = signal<string | null>(null);
 export const history = signal<RunSummary[]>([]);
 export const cancelling = signal(false);

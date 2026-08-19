@@ -107,18 +107,22 @@ export interface Gap {
   where: string;
 }
 
+// A run.json is a file on disk, not a live API. The four ceiling fields were added later, so
+// a record written before them has no such key at all — optional rather than `| null`, because
+// `ceiling: number | null` is a promise the older files on disk do not keep, and reading them
+// as though they did took the whole run view down with one `.toFixed`.
 export interface ScoreRecord {
   total: number;
   threshold: number;
   met: boolean;
-  /** The highest score this record could reach for this posting. Null on older runs. */
-  ceiling: number | null;
+  /** The highest score this record could reach for this posting. */
+  ceiling?: number | null;
   /** The loop got everything out of the record there was to get. */
-  at_ceiling: boolean;
+  at_ceiling?: boolean;
   /** Keywords no grounded document could ever contain, because the record has not got them. */
-  unreachable: string[];
+  unreachable?: string[];
   /** Which stopping rule ended the loop: threshold | ceiling | plateau | exhausted | ... */
-  stop_reason: string;
+  stop_reason?: string;
   components: ScoreComponent[];
   matched: string[];
   /** Not in the record at all — a fact about you, which no rewrite closes. */
@@ -169,4 +173,23 @@ export interface RunRecord {
   score: ScoreRecord | null;
   documents: DocumentRecord[];
   legacy?: boolean;
+}
+
+/**
+ * What `/api/runs/{id}` answers for a directory with no `run.json`.
+ *
+ * It is a `RunSummary`, not a `RunRecord` — no `jd`, no `documents`, no score. Typing the
+ * endpoint as always returning the latter is what made the run view read `run.jd.title` off
+ * an object that has never had a `jd`.
+ */
+export interface LegacyRunRecord extends RunSummary {
+  legacy: true;
+}
+
+export type LoadedRun = RunRecord | LegacyRunRecord;
+
+export function isLegacy(run: LoadedRun): run is LegacyRunRecord {
+  // The discriminator is the absence of the structured half, not the `legacy` flag: a real
+  // record also carries `legacy` in one of its two shapes, and only one of them has a `jd`.
+  return (run as RunRecord).jd === undefined;
 }

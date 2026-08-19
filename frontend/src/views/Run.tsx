@@ -1,16 +1,26 @@
+import { api } from "../api";
 import { DocumentPanel } from "../components/DocumentPanel";
 import { GapPanel, ScorePanel } from "../components/Score";
 import { StageLog } from "../components/StageLog";
 import { closeRun, record, recordError, running } from "../run";
+import { isLegacy } from "../types";
+import type { LegacyRunRecord } from "../types";
 
 export function RunView() {
-  const run = record.value;
+  const loaded = record.value;
+  // A directory with no run.json answers with a RunSummary: no jd, no documents, no score.
+  // Reading it as though it were a full record is what took this view down on any run made
+  // before that file existed — and those runs are still real, and their PDFs still open.
+  const run = loaded && !isLegacy(loaded) ? loaded : null;
+  const legacy = loaded && isLegacy(loaded) ? loaded : null;
 
   return (
     <>
       <StageLog />
 
       {recordError.value && <p class="error">{recordError.value}</p>}
+
+      {legacy && <LegacyRun run={legacy} />}
 
       {run && (
         <>
@@ -47,9 +57,37 @@ export function RunView() {
         </>
       )}
 
-      {!run && !running.value && !recordError.value && (
+      {!loaded && !running.value && !recordError.value && (
         <p class="field-hint">Loading the run…</p>
       )}
     </>
+  );
+}
+
+/** A run from before run.json existed. Nothing structured to show, and the files still open. */
+function LegacyRun({ run }: { run: LegacyRunRecord }) {
+  return (
+    <section class="card">
+      <header class="run-head">
+        <div>
+          <h2>{run.title || run.run_id}</h2>
+          <p class="field-hint">
+            This run predates the structured record, so only its files are available.
+          </p>
+        </div>
+        <button class="secondary" onClick={closeRun}>
+          New run
+        </button>
+      </header>
+      <ul class="gap-list">
+        {run.pdfs.map((name) => (
+          <li key={name}>
+            <a href={api.fileUrl(run.run_id, name)} target="_blank" rel="noreferrer">
+              {name}
+            </a>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }

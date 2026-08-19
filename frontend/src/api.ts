@@ -1,4 +1,4 @@
-import type { DoctorReport, JobSnapshot, RunRecord, RunRequest, RunSummary } from "./types";
+import type { DoctorReport, JobSnapshot, LoadedRun, RunRequest, RunSummary } from "./types";
 
 /** A failed request that still carries what the server said, so the UI can show it. */
 export class ApiError extends Error {
@@ -35,7 +35,8 @@ export const api = {
 
   runs: () => request<{ runs: RunSummary[] }>("/api/runs").then((body) => body.runs),
 
-  run: (runId: string) => request<RunRecord>(`/api/runs/${encodeURIComponent(runId)}`),
+  /** May answer with a legacy shape — a run directory that predates run.json. */
+  run: (runId: string) => request<LoadedRun>(`/api/runs/${encodeURIComponent(runId)}`),
 
   /** Only the events the caller has not seen — a long run's snapshot stays small. */
   current: (since = 0) => request<JobSnapshot>(`/api/runs/current?since=${since}`),

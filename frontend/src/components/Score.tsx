@@ -17,7 +17,11 @@ const STOP_REASON: Record<string, string> = {
  * and printing it alone would invite exactly the misreading the caveat exists to prevent.
  */
 export function ScorePanel({ score }: { score: ScoreRecord }) {
-  const ceiling = score.ceiling;
+  // `?? null` rather than a bare read: a run.json written before the ceiling existed has no
+  // such key, and `undefined` slipped past every `=== null` guard below straight into
+  // `.toFixed`, which blanked the whole run view for every historical run.
+  const ceiling = score.ceiling ?? null;
+  const unreachable = score.unreachable ?? [];
   // "Below the threshold" is the wrong headline when the threshold was never available to
   // this record. Which of the three it is changes what the reader should do next, so the
   // pill says which rather than making them work it out from the number.
@@ -26,7 +30,7 @@ export function ScorePanel({ score }: { score: ScoreRecord }) {
     ? { tone: "pill-ok", text: "met the threshold" }
     : !reachable
       ? { tone: "pill-ok", text: `all this record could reach — ${ceiling!.toFixed(1)} max here` }
-      : score.at_ceiling
+      : (score.at_ceiling ?? false)
         ? { tone: "pill-warn", text: "at this record's ceiling" }
         : { tone: "pill-warn", text: `below the threshold of ${score.threshold}` };
 
@@ -50,7 +54,7 @@ export function ScorePanel({ score }: { score: ScoreRecord }) {
         <p class="field-hint">
           The threshold of {score.threshold} was never reachable here: this posting caps at{" "}
           {ceiling.toFixed(1)} for your record
-          {score.unreachable.length > 0 && <> because of {score.unreachable.slice(0, 8).join(", ")}</>}
+          {unreachable.length > 0 && <> because of {unreachable.slice(0, 8).join(", ")}</>}
           . That is the answer to the question, not a failure to answer it.
         </p>
       )}
