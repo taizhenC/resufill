@@ -66,7 +66,7 @@ def test_facts_come_from_the_profile_not_the_document(example_profile):
     entry = experience["entries"][0]
     assert entry["primary"] == "Backend Engineer Intern"
     assert entry["secondary"] == "Northwind Analytics - New York, NY"
-    assert entry["dates"] == "Jun 2025 – Aug 2025"
+    assert entry["dates"] == "June 2025 – August 2025"
 
 
 def test_empty_sections_are_dropped_not_rendered_blank(example_profile):
@@ -165,7 +165,7 @@ def test_the_dates_stay_attached_to_their_own_job(example_profile, tmp_path):
     doc = _doc()
     rendered = render_resume(doc, example_profile, tmp_path, CFG)
     text = flatten(verify(rendered.pdf_path, doc, example_profile).text)
-    assert "backend engineer intern | jun 2025 - aug 2025 northwind analytics - new york, ny" in text
+    assert "backend engineer intern | june 2025 - august 2025 northwind analytics - new york, ny" in text
 
 
 @needs_chromium
