@@ -5,7 +5,7 @@ the endpoints return, what they refuse, and that a run really does happen in a t
 import pytest
 from conftest import needs_chromium
 from fastapi.testclient import TestClient
-from test_pipeline import HONEST, HONEST_CEILING, LETTER, POSTING, UNSALVAGEABLE
+from test_pipeline import HONEST, HONEST_SCORE, LETTER, POSTING, RECORD_CEILING, UNSALVAGEABLE
 
 from resume_fill.config import Settings
 
@@ -98,11 +98,11 @@ def test_a_full_run_through_the_api(client):
     runs = client.get("/api/runs").json()["runs"]
     assert len(runs) == 1
     assert runs[0]["company"] == "Northwind"
-    assert runs[0]["total"] == HONEST_CEILING
+    assert runs[0]["total"] == HONEST_SCORE
     assert runs[0]["legacy"] is False
 
     record = client.get(f"/api/runs/{runs[0]['run_id']}").json()
-    assert record["score"]["total"] == HONEST_CEILING
+    assert record["score"]["total"] == HONEST_SCORE
     assert [g["keyword"] for g in record["score"]["gaps_absent"]] == ["Kubernetes"]
     # The audit trail the UI renders, with source text embedded.
     claims = record["documents"][0]["claims"]
@@ -307,10 +307,11 @@ def test_analyze_answers_before_anything_is_spent(client):
     assert body["deterministic"] is True
     assert body["jd"]["title"] == "Backend Engineer, Data Platform"
     assert body["jd"]["company"] == "Northwind"
-    assert body["ceiling"]["total"] == HONEST_CEILING
+    assert body["ceiling"]["total"] == RECORD_CEILING
     assert body["ceiling"]["unreachable"] == ["Kubernetes"]
-    # This server's threshold is 70 and the ceiling is 71.2, so it is reachable — barely,
-    # and only by a draft that surfaces everything the record has.
+    # This server's threshold is 70 and the ceiling is 75.0, so it is reachable — but only
+    # by a draft that surfaces everything the record has *and* names the role in the
+    # posting's own words.
     assert body["ceiling"]["reachable"] is True
     assert body["ceiling"]["threshold"] == 70
     assert "Python" in body["covered"] and "PostgreSQL" in body["covered"]
@@ -327,3 +328,21 @@ def test_analyze_costs_no_model_call(client, monkeypatch):
 
 def test_analyze_refuses_an_empty_posting(client):
     assert client.post("/api/analyze", json={"jd": ""}).status_code == 422
+
+
+@needs_chromium
+def test_a_run_exposes_what_it_cost(client):
+    """The wiring, not the arithmetic — test_meter.py owns the counting.
+
+    The figures are zero here on purpose: the meter counts inside llm.complete_json, which
+    these tests replace with a stub, and a stub is not a provider. What is being asserted is
+    that both the live snapshot and the saved record carry the field, because the browser is
+    the only place the price of another iteration is visible while there is still time to
+    cancel one.
+    """
+    client.post("/api/runs", json={"jd": JD, "mode": "resume"})
+    assert client.runner.wait(120)
+
+    assert "usage" in client.get("/api/runs/current").json()
+    run_id = client.get("/api/runs").json()["runs"][0]["run_id"]
+    assert "usage" in client.get(f"/api/runs/{run_id}").json()

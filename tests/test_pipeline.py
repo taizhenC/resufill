@@ -10,6 +10,7 @@ import pytest
 from conftest import needs_chromium
 
 from resume_fill.config import Settings
+from resume_fill.document import ResumeDoc
 from resume_fill.jd import parse_deterministic
 from resume_fill.llm import LLMError
 from resume_fill.pipeline import generate, run_dir
@@ -100,10 +101,21 @@ WEAKER["experience"][0]["bullets"][0]["text"] = (
 )
 WEAKER["skills"] = {}
 
-# The honest draft ceilings at 71.2 against this posting, because it asks for Kubernetes
-# and nothing in the record has ever touched it. That number is now derived rather than
-# asserted by hand — score.ceiling() computes it from the record before any model call.
-HONEST_CEILING = 71.2
+# The same draft with the posting's own words in the headline. Nothing else changes, and
+# nothing here is a claim — the gate polices technologies and figures, not which ordinary
+# words describe the same job — so those points are simply free, and the ceiling knows it.
+HONEST_TITLED = json.loads(json.dumps(HONEST))
+HONEST_TITLED["headline"] = "Backend engineer, data platform — Python, PostgreSQL"
+
+# What this record can reach against this posting: 75.0. It stops short of 100 because the
+# posting asks for Kubernetes and nothing in the record has ever touched it. Both numbers
+# are derived rather than measured by hand — score.ceiling() computes the first from the
+# record before any model call.
+RECORD_CEILING = 75.0
+# What the honest draft actually gets. Below the ceiling by exactly the headline: it names
+# the role in its own words rather than the posting's, which is the cheapest 3.8 points on
+# the page and the one thing a rewrite always can close.
+HONEST_SCORE = 71.2
 MIDDLING_SCORE = 46.2
 
 
@@ -247,20 +259,40 @@ def test_the_loop_stops_as_soon_as_the_threshold_is_met(example_profile, tmp_pat
 @needs_chromium
 def test_the_loop_stops_at_what_the_record_can_reach(example_profile, tmp_path):
     """The complaint this exists to answer: a threshold of 99 against a record that tops out
-    at 71.2 used to cost four model calls to learn what the first one already knew.
+    at 75.0 used to cost four model calls to learn what the first one already knew.
 
     ground.py is what makes stopping here honest rather than lazy — the missing points are
     Kubernetes, the record has never touched it, and no rewrite is permitted to invent it.
     """
     cfg = _cfg(tmp_path, SCORE_THRESHOLD=99, MAX_ITER=4)
-    result = generate(example_profile, POSTING, None, cfg, _scripted(HONEST), out_dir=tmp_path / "run")
+    result = generate(example_profile, POSTING, None, cfg, _scripted(HONEST_TITLED),
+                      out_dir=tmp_path / "run")
 
     assert len(result.attempts) == 1
     assert result.stop_reason == "ceiling"
     assert result.at_ceiling
     assert not result.threshold_reachable
-    assert result.reachable == HONEST_CEILING
+    assert result.reachable == RECORD_CEILING
     assert result.ceiling.unreachable == ["Kubernetes"]
+
+
+@needs_chromium
+def test_a_draft_can_never_score_above_the_ceiling(example_profile, tmp_path):
+    """The only interesting answer is False, and it used to be False.
+
+    The ceiling conflated two halves of title_fit that have different maxima: the level a
+    record shows is fixed, but the *words* a headline uses are phrasing, and phrasing the
+    headline in the posting's own words is free. Measuring both against the held titles
+    produced a "ceiling" a real draft scored 3.8 points above — which reads as a bug in the
+    report and undermines the one thing the number is for.
+    """
+    from resume_fill.score import ceiling, score
+
+    index = example_profile.sources()
+    limit = ceiling(example_profile, POSTING, index)
+    for draft in (HONEST, HONEST_TITLED, MIDDLING, WEAKER):
+        total = score(ResumeDoc.model_validate(draft), example_profile, POSTING, index).total
+        assert limit.covers(total), f"{total} > {limit.total}"
 
 
 @needs_chromium
@@ -290,10 +322,10 @@ def test_the_ceiling_is_known_before_the_first_model_call(example_profile, tmp_p
     from resume_fill.score import ceiling
 
     limit = ceiling(example_profile, POSTING, example_profile.sources())
-    assert limit.total == HONEST_CEILING
+    assert limit.total == RECORD_CEILING
     assert limit.unreachable == ["Kubernetes"]
     assert not limit.is_reachable(80)
-    assert limit.gap_to(80) == pytest.approx(8.8)
+    assert limit.gap_to(80) == pytest.approx(5.0)
 
 
 @needs_chromium
@@ -307,7 +339,7 @@ def test_an_honest_ceiling_below_the_threshold_still_produces_a_pdf(example_prof
     assert not result.met_threshold
     # Two of three named technologies, two of three qualifications. The missing third is
     # Kubernetes, and the loop had no honest way to reach it.
-    assert result.best.total == HONEST_CEILING
+    assert result.best.total == HONEST_SCORE
     assert result.best.score.component("hard_skills").detail == "2 of 3 named technologies appear"
 
     report = (tmp_path / "run" / "report.md").read_text(encoding="utf-8")
@@ -336,7 +368,7 @@ def test_a_run_writes_a_structured_record_beside_the_report(example_profile, tmp
     assert record.ok is True
     assert record.cancelled is False
     assert record.jd.company == "Northwind"
-    assert record.score.total == HONEST_CEILING
+    assert record.score.total == HONEST_SCORE
     assert record.settings["model"]
 
     doc = record.document("resume")

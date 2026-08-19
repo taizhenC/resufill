@@ -45,6 +45,9 @@ class JobState:
     ok: bool = False
     error: str | None = None
     finished_at_ms: int | None = None
+    # What the run has cost so far. The browser shows it live, which is the only place the
+    # price of another iteration is visible while there is still time to cancel one.
+    usage: dict = field(default_factory=dict)
     # The worker writes and the request thread reads; both go through this.
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
@@ -83,6 +86,7 @@ class JobState:
                 "done": self.done,
                 "ok": self.ok,
                 "error": self.error,
+                "usage": dict(self.usage),
             }
 
 

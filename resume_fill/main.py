@@ -27,6 +27,7 @@ from . import jd as jd_module
 from . import score as score_module
 from .config import PACKAGE_DIR, settings
 from .jobs import Busy, JobRunner, JobState
+from .meter import Meter
 from .pipeline import MODES, run, run_dir, source_index
 from .profile import ProfileError, load_profile
 from .progress import PARSING_JD, Progress
@@ -258,8 +259,10 @@ def _work(request: RunRequest, cfg) -> Callable[[JobState], None]:
     """Build the closure the worker thread runs. Everything blocking happens in here."""
 
     def job(state: JobState) -> None:
+        meter = Meter()
+
         def call(system: str, user: str) -> dict:
-            return llm.complete_json(system, user, cfg=cfg)
+            return llm.complete_json(system, user, cfg=cfg, meter=meter)
 
         progress = Progress(sink=state.report, cancel=state.cancel_event)
 
@@ -271,9 +274,9 @@ def _work(request: RunRequest, cfg) -> Callable[[JobState], None]:
 
         result = run(
             load_profile(cfg.PROFILE_PATH), job_desc, corpus, cfg, call,
-            out_dir=out_dir, mode=request.mode, progress=progress,
+            out_dir=out_dir, mode=request.mode, progress=progress, meter=meter,
         )
-        state.set(ok=result.ok, cancelled=result.cancelled)
+        state.set(ok=result.ok, cancelled=result.cancelled, usage=meter.as_dict())
 
     return job
 

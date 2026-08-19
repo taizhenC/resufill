@@ -83,6 +83,7 @@ class ScoreRecord(BaseModel):
     gaps_unsurfaced: list[GapRecord] = Field(default_factory=list)
     stuffed: list[str] = Field(default_factory=list)
     unaddressed_qualifications: list[str] = Field(default_factory=list)
+    title_words_missing: list[str] = Field(default_factory=list)
 
 
 class VerifyRecord(BaseModel):
@@ -106,6 +107,9 @@ class DocumentRecord(BaseModel):
     # silently absorbed, because "the résumé is shorter than you expected" is a question
     # somebody will ask, and this is the answer.
     removed: list[str] = Field(default_factory=list)
+    # The machine-readability rubric, check by check. See ats.py for what is in it and, more
+    # importantly, what is deliberately left out.
+    ats: list[dict] = Field(default_factory=list)
 
 
 class JobRecord(BaseModel):
@@ -127,6 +131,9 @@ class RunRecord(BaseModel):
     cancelled: bool = False
     jd: JobRecord = Field(default_factory=JobRecord)
     settings: dict[str, float | int | bool | str] = Field(default_factory=dict)
+    # What the run cost: model calls, tokens, and seconds spent waiting on the model. Empty
+    # for a run made before this was counted. Deliberately not a price — see meter.py.
+    usage: dict[str, float | int] = Field(default_factory=dict)
     score: ScoreRecord | None = None
     documents: list[DocumentRecord] = Field(default_factory=list)
 
@@ -217,6 +224,7 @@ def score_record(
         ],
         stuffed=list(score.stuffed),
         unaddressed_qualifications=list(score.unaddressed_qualifications),
+        title_words_missing=list(score.title_words_missing),
     )
 
 

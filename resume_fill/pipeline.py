@@ -33,7 +33,7 @@ from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
 
-from . import ground, runrecord
+from . import ats, ground, letter_review, runrecord
 from . import report as report_module
 from . import score as score_module
 from .config import Settings
@@ -41,6 +41,7 @@ from .document import CoverLetter, ResumeDoc
 from .evidence import Corpus
 from .jd import JobDescription
 from .llm import LLMCall
+from .meter import Meter
 from .profile import Profile
 from .progress import (
     CANCELLED,
@@ -74,6 +75,7 @@ class Attempt:
     score: Score | None = None
     verify_report: VerifyReport | None = None
     rendered: Rendered | None = None
+    review: ats.AtsReport | None = None
 
     @property
     def document(self) -> ResumeDoc:
@@ -222,7 +224,8 @@ def generate(
         try:
             report(TAILORING, **where)
             doc = tailor(
-                profile, jd, corpus, llm_call, max_pages=cfg.RESUME_MAX_PAGES, feedback=feedback
+                profile, jd, corpus, llm_call, max_pages=cfg.RESUME_MAX_PAGES, feedback=feedback,
+                extra_rules=ats.TAILOR_RULES,
             )
             attempt = Attempt(number=number, doc=doc)
 
@@ -259,8 +262,17 @@ def generate(
             )
 
             report(SCORING, **where)
+            # Built here rather than inside score(): the parsing half of the rubric needs the
+            # rendered HTML and the real page count, and neither is knowable from the
+            # document alone.
+            attempt.review = ats.review(
+                rendered_doc, profile,
+                html=attempt.rendered.html_path.read_text(encoding="utf-8"),
+                page_count=attempt.rendered.page_count,
+                max_pages=cfg.RESUME_MAX_PAGES,
+            )
             attempt.score = score_module.score(
-                rendered_doc, profile, jd, index, attempt.verify_report
+                rendered_doc, profile, jd, index, attempt.verify_report, attempt.review
             )
             report(
                 SCORED, **where, score=attempt.score.total,
@@ -282,6 +294,7 @@ def generate(
             part
             for part in (
                 repair_feedback,
+                ats.feedback(attempt.review) if attempt.review else "",
                 score_module.feedback(
                     attempt.score, min(cfg.SCORE_THRESHOLD, limit.total), attempt.verify_report
                 ),
@@ -347,17 +360,20 @@ def _stop_reason(attempt: Attempt, previous_best: float, limit: Ceiling, cfg: Se
 
 
 def resume_report(
-    result: RunResult, profile: Profile, jd: JobDescription, index: SourceIndex, cfg: Settings
+    result: RunResult, profile: Profile, jd: JobDescription, index: SourceIndex, cfg: Settings,
+    meter: Meter | None = None,
 ) -> str:
     best = result.best
     return report_module.build(
         doc=best.document, profile=profile, jd=jd, index=index,
         removed=best.repair.notes() if best.repair else [],
         score=best.score or score_module.score(best.document, profile, jd, index),
+        review=best.review,
         verify_report=best.verify_report, iterations=len(result.attempts),
         threshold=cfg.SCORE_THRESHOLD, blocked_terms=result.blocked_terms,
         violations=best.violations,
         ceiling=result.ceiling, stop_reason=result.why_stopped(),
+        cost=meter.summary() if meter else "",
     )
 
 
@@ -372,6 +388,11 @@ class CoverAttempt:
     repair: ground.LetterRepair | None = None
     verify_report: VerifyReport | None = None
     rendered: Rendered | None = None
+    review: letter_review.LetterReview | None = None
+
+    @property
+    def reads_well(self) -> bool:
+        return self.review is None or self.review.ok
 
     @property
     def document(self) -> CoverLetter:
@@ -418,8 +439,16 @@ def generate_cover(
     out_dir: Path,
     progress: Progress | None = None,
 ) -> CoverRun:
-    """Grounding-only loop. There is no score for a cover letter and inventing one would
-    be inventing a metric — the résumé's proxy is already an explicitly-labelled proxy."""
+    """Grounding, then craft. There is still no *score* for a cover letter — inventing one
+    would be inventing a metric, and the résumé's proxy is already an explicitly-labelled
+    proxy — but "does this read like a form letter?" has legible answers, and
+    letter_review.py checks them.
+
+    The two questions are different and both are needed. ground.py asks whether any of it is
+    false. A letter can pass that completely and still open "I am writing to express my
+    interest", which is the single most common first line in the pile and the specific thing
+    a reader is scanning for.
+    """
     from . import cover
 
     index = source_index(profile, corpus)
@@ -470,9 +499,11 @@ def generate_cover(
                 attempt.rendered.pdf_path, written, profile,
                 max_pages=cfg.COVER_LETTER_MAX_PAGES, page_count=attempt.rendered.page_count,
             )
+            attempt.review = letter_review.review(written, jd, profile)
             report(
                 SCORED, **where, parses=attempt.verify_report.ok,
                 pages=attempt.verify_report.page_count, words=written.word_count(),
+                reads_well=attempt.review.ok,
             )
         except Cancelled:
             cancelled = True
@@ -480,7 +511,7 @@ def generate_cover(
                 raise
             break
 
-        if attempt.verify_report.ok and not attempt.repaired:
+        if attempt.verify_report.ok and not attempt.repaired and attempt.reads_well:
             break
         parts = [repair_feedback] if repair_feedback else []
         if not attempt.verify_report.ok:
@@ -488,11 +519,19 @@ def generate_cover(
                 "The rendered PDF failed its checks:\n"
                 + "\n".join(f"  - {item}" for item in attempt.verify_report.missing[:10])
             )
-        feedback = "\n\n".join(parts)
+        if attempt.review is not None:
+            parts.append(letter_review.feedback(attempt.review))
+        feedback = "\n\n".join(p for p in parts if p)
 
     best = max(
         attempts,
-        key=lambda a: (a.grounded, bool(a.verify_report and a.verify_report.ok), not a.repaired),
+        key=lambda a: (
+            a.grounded,
+            bool(a.verify_report and a.verify_report.ok),
+            a.reads_well,
+            -len(a.review.failed) if a.review else 0,
+            not a.repaired,
+        ),
     )
     if best.grounded and best is not attempts[-1]:
         best.rendered = render_cover_letter(best.document, profile, out_dir, cfg)
@@ -522,6 +561,8 @@ class Run:
     cover: CoverRun | None = None
     cancelled: bool = False
     record_path: Path | None = None
+    # What the run actually cost. None when nobody was counting.
+    meter: Meter | None = None
 
     @property
     def ok(self) -> bool:
@@ -539,6 +580,7 @@ def run(
     out_dir: Path,
     mode: str = "both",
     progress: Progress | None = None,
+    meter: Meter | None = None,
 ) -> Run:
     if mode not in MODES:
         raise ValueError(f"mode must be one of {MODES}, got {mode!r}")
@@ -579,7 +621,7 @@ def run(
 
     sections = []
     if resume_result is not None:
-        sections.append(resume_report(resume_result, profile, jd, index, cfg))
+        sections.append(resume_report(resume_result, profile, jd, index, cfg, meter))
     if cover_result is not None:
         sections.append(report_module.cover_section(cover_result, jd, index))
     report_path.write_text("\n".join(sections), encoding="utf-8")
@@ -588,8 +630,9 @@ def run(
         out_dir=out_dir, mode=mode, report_path=report_path,
         resume=resume_result, cover=cover_result, cancelled=cancelled,
     )
+    result.meter = meter
     result.record_path = runrecord.save(
-        build_record(result, jd, index, cfg), out_dir
+        build_record(result, jd, index, cfg, meter), out_dir
     )
     if progress is not None:
         stage = CANCELLED if cancelled else DONE
@@ -600,7 +643,7 @@ def run(
 
 
 def build_record(
-    result: Run, jd: JobDescription, index: SourceIndex, cfg: Settings
+    result: Run, jd: JobDescription, index: SourceIndex, cfg: Settings, meter: Meter | None = None
 ) -> runrecord.RunRecord:
     """The structured account of the run, for anything that is not a human reading prose."""
     documents: list[runrecord.DocumentRecord] = []
@@ -618,6 +661,7 @@ def build_record(
                 blocked_terms=list(result.resume.blocked_terms),
                 violations=[str(v) for v in best.violations],
                 removed=best.repair.notes() if best.repair else [],
+                ats=best.review.as_dict() if best.review else [],
             )
         )
     if result.cover is not None:
@@ -632,6 +676,7 @@ def build_record(
                 claims=runrecord.cover_claims(best_cover.document, index),
                 blocked_terms=list(result.cover.blocked_terms),
                 violations=[str(v) for v in best_cover.violations],
+                ats=best_cover.review.as_dict() if best_cover.review else [],
                 removed=(
                     [f"{v.where} — {v.detail}" for v in best_cover.repair.dropped]
                     if best_cover.repair
@@ -657,6 +702,7 @@ def build_record(
             "strict_score": cfg.STRICT_SCORE,
             "model": cfg.LLM_MODEL,
         },
+        usage=meter.as_dict() if meter else {},
         score=runrecord.score_record(
             result.resume.best.score if result.resume else None, cfg.SCORE_THRESHOLD,
             ceiling=result.resume.ceiling if result.resume else None,

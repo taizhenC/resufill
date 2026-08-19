@@ -104,7 +104,11 @@ def test_the_prompt_states_the_rule_that_separates_enthusiasm_from_a_claim(examp
     system, user = build_prompt(example_profile, POSTING, None, CFG)
     assert "Enthusiasm is not evidence" in system
     assert "DECLARED SKILLS" in user
-    assert "do not flatter the company" in user
+    assert "do not praise the" in user
+    # The two things the prompt is actually for, both of which letter_review.py then checks
+    # rather than trusting: the opening, and the vocabulary that reads as machine-written.
+    assert '"I am writing to..."' in user
+    assert "delve" in user
     assert CFG.COVER_LETTER_TONE in user
 
 

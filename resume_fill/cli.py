@@ -2,6 +2,7 @@
 
     resume-fill init              bootstrap profile.yaml from a LinkedIn export + résumé PDF
     resume-fill blog sync         refresh the evidence corpus from BLOG_URL
+    resume-fill preview           what a posting wants vs what your record has, for free
     resume-fill gen               job description -> tailored, grounded, verified PDFs
     resume-fill linkedin draft    proposed profile copy + diff vs current
     resume-fill serve             the same generate loop, in a browser
@@ -180,6 +181,76 @@ def cmd_linkedin_draft(args: argparse.Namespace) -> int:
     return 0
 
 
+# --------------------------------------------------------------- preview ----
+
+
+def cmd_preview(args: argparse.Namespace) -> int:
+    """What a posting asks for and how far the record can get — for free.
+
+    `gen` answers this too, at the cost of a minute and up to four model calls. But the two
+    stages that produce the answer never needed a model: the lexicon pass over the posting
+    (which is what lets this tool read a posting with no API key configured at all) and the
+    ceiling, which depends on the record and the posting rather than on anything written.
+
+    The question "is this one worth applying to, and what will it say I am missing?" does
+    not get a better answer for having been paid for.
+    """
+    from . import evidence
+    from . import jd as jd_module
+    from . import score as score_module
+    from .config import settings as cfg
+    from .pipeline import source_index
+    from .profile import ProfileError, load_profile
+    from .textutil import contains_term
+
+    try:
+        profile = load_profile(cfg.PROFILE_PATH)
+    except ProfileError as exc:
+        print(f"{BAD} {exc}")
+        return 1
+    try:
+        posting = jd_module.read_input(args.jd, user_agent=cfg.BLOG_USER_AGENT)
+    except (OSError, ValueError) as exc:
+        print(f"{BAD} {exc}")
+        return 1
+
+    job = jd_module.parse_deterministic(posting)
+    index = source_index(profile, evidence.load(cfg.EVIDENCE_PATH))
+    limit = score_module.ceiling(profile, job, index)
+    haystack = score_module.record_text(profile, index)
+    out_of_reach = {t.casefold() for t in limit.unreachable}
+    covered = [
+        term for term in dict.fromkeys([*job.hard_skills, *job.keywords])
+        if term.casefold() not in out_of_reach and contains_term(haystack, term)
+    ]
+
+    print("== resume-fill preview ==")
+    print(f"{INFO} posting: {job.summary_line()}")
+    if job.min_years is not None:
+        print(f"{INFO} asks for {job.min_years}+ years")
+    print(f"{INFO} no model was called and nothing was spent")
+    print()
+
+    if covered:
+        print(f"{OK} your record covers: " + ", ".join(covered[:20]))
+    if limit.unreachable:
+        print(f"{WARN} nothing in your record supports: " + ", ".join(limit.unreachable[:20]))
+    if job.qualifications:
+        print(f"{INFO} qualifications the posting lists:")
+        for qualification in job.qualifications[:12]:
+            print(f"     - {qualification}")
+
+    print()
+    print(f"{INFO} the highest this record can score for this posting is {limit.total:.1f} "
+          f"(threshold {cfg.SCORE_THRESHOLD:.0f})")
+    if not limit.is_reachable(cfg.SCORE_THRESHOLD):
+        print(f"{INFO} the threshold is {limit.gap_to(cfg.SCORE_THRESHOLD):.1f} above that, and no "
+              "rewrite closes the difference - the gate will not let those keywords be invented.")
+    print(f"{INFO} this is the deterministic pass only. `gen` also runs the model over the "
+          "posting, which usually finds more.")
+    return 0
+
+
 # ------------------------------------------------------------------- gen ----
 
 
@@ -187,6 +258,7 @@ def cmd_gen(args: argparse.Namespace) -> int:
     from . import evidence, llm
     from . import jd as jd_module
     from .config import settings
+    from .meter import Meter
     from .pipeline import run, run_dir
     from .profile import ProfileError, load_profile
     from .progress import Progress
@@ -220,7 +292,12 @@ def cmd_gen(args: argparse.Namespace) -> int:
         print(f"{BAD} {exc}")
         return 1
 
-    job = jd_module.parse(posting, lambda s, u: llm.complete_json(s, u, cfg=cfg))
+    meter = Meter()
+
+    def call(system: str, user: str) -> dict:
+        return llm.complete_json(system, user, cfg=cfg, meter=meter)
+
+    job = jd_module.parse(posting, call)
     corpus = evidence.load(cfg.EVIDENCE_PATH)
     out_dir = Path(args.out) if args.out else run_dir(job, cfg)
     mode = "cover" if args.cover else ("resume" if args.resume else "both")
@@ -234,9 +311,8 @@ def cmd_gen(args: argparse.Namespace) -> int:
 
     try:
         result = run(
-            profile, job, corpus, cfg,
-            lambda s, u: llm.complete_json(s, u, cfg=cfg),
-            out_dir=out_dir, mode=mode, progress=Progress(sink=_stage_line),
+            profile, job, corpus, cfg, call,
+            out_dir=out_dir, mode=mode, progress=Progress(sink=_stage_line), meter=meter,
         )
     except (llm.LLMError, RenderError) as exc:
         print(f"{BAD} {exc}")
@@ -248,6 +324,7 @@ def cmd_gen(args: argparse.Namespace) -> int:
         code |= _report_resume(result.resume, cfg)
     if result.cover is not None:
         code |= _report_cover(result.cover)
+    print(f"{INFO} cost:   {meter.summary()}")
     print(f"{INFO} report: {result.report_path}")
     if result.record_path:
         print(f"{INFO} record: {result.record_path}")
@@ -300,6 +377,10 @@ def _report_cover(cover_run) -> int:
     if best.repair is not None and best.repair.dropped:
         print(f"{WARN} {len(best.repair.dropped)} paragraph(s) removed - they claimed more "
               "than the record supports")
+    if best.review is not None and best.review.failed:
+        print(f"{INFO} {best.review.summary()}:")
+        for check in best.review.failed:
+            print(f"     - {'[!]' if check.blocking else '   '} {check.name}: {check.detail}")
     if cover_run.blocked_terms:
         print(f"{INFO} the gate blocked these claims: " + ", ".join(cover_run.blocked_terms[:12]))
     if not cover_run.ok:
@@ -470,6 +551,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_draft.add_argument("--export", metavar="DIR", help="LinkedIn export, to diff against the live copy")
     p_draft.add_argument("--out", metavar="FILE", help="where to write the draft")
     p_draft.set_defaults(func=cmd_linkedin_draft)
+
+    p_preview = sub.add_parser(
+        "preview", help="what a posting wants and how far your record reaches - costs nothing"
+    )
+    p_preview.add_argument("--jd", required=True, help="path, https URL, or - for stdin")
+    p_preview.set_defaults(func=cmd_preview)
 
     p_gen = sub.add_parser("gen", help="job description -> tailored, grounded, verified résumé PDF")
     p_gen.add_argument("--jd", required=True, metavar="SOURCE",
