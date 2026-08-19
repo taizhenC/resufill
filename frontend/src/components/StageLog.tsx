@@ -1,4 +1,14 @@
-import { cancelling, cancelRun, documentLabel, events, job, running, stageLabel, timeline } from "../run";
+import {
+  cancelling,
+  cancelRun,
+  costLine,
+  documentLabel,
+  events,
+  job,
+  running,
+  stageLabel,
+  timeline,
+} from "../run";
 import { Timeline } from "./Timeline";
 
 /**
@@ -46,6 +56,12 @@ export function StageLog() {
       )}
 
       <Timeline items={items} live={running.value} />
+
+      {/* Live, and that is the point: this is the only moment the price of another iteration
+          is visible while there is still time to press Cancel. */}
+      {costLine(snapshot.usage) && (
+        <p class="field-hint cost">{costLine(snapshot.usage)} so far</p>
+      )}
 
       {snapshot.error && <p class="error">{snapshot.error}</p>}
     </section>
