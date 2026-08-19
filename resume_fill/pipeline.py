@@ -33,7 +33,7 @@ from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
 
-from . import ats, ground, runrecord
+from . import ats, ground, letter_review, runrecord
 from . import report as report_module
 from . import score as score_module
 from .config import Settings
@@ -385,6 +385,11 @@ class CoverAttempt:
     repair: ground.LetterRepair | None = None
     verify_report: VerifyReport | None = None
     rendered: Rendered | None = None
+    review: letter_review.LetterReview | None = None
+
+    @property
+    def reads_well(self) -> bool:
+        return self.review is None or self.review.ok
 
     @property
     def document(self) -> CoverLetter:
@@ -431,8 +436,16 @@ def generate_cover(
     out_dir: Path,
     progress: Progress | None = None,
 ) -> CoverRun:
-    """Grounding-only loop. There is no score for a cover letter and inventing one would
-    be inventing a metric — the résumé's proxy is already an explicitly-labelled proxy."""
+    """Grounding, then craft. There is still no *score* for a cover letter — inventing one
+    would be inventing a metric, and the résumé's proxy is already an explicitly-labelled
+    proxy — but "does this read like a form letter?" has legible answers, and
+    letter_review.py checks them.
+
+    The two questions are different and both are needed. ground.py asks whether any of it is
+    false. A letter can pass that completely and still open "I am writing to express my
+    interest", which is the single most common first line in the pile and the specific thing
+    a reader is scanning for.
+    """
     from . import cover
 
     index = source_index(profile, corpus)
@@ -483,9 +496,11 @@ def generate_cover(
                 attempt.rendered.pdf_path, written, profile,
                 max_pages=cfg.COVER_LETTER_MAX_PAGES, page_count=attempt.rendered.page_count,
             )
+            attempt.review = letter_review.review(written, jd, profile)
             report(
                 SCORED, **where, parses=attempt.verify_report.ok,
                 pages=attempt.verify_report.page_count, words=written.word_count(),
+                reads_well=attempt.review.ok,
             )
         except Cancelled:
             cancelled = True
@@ -493,7 +508,7 @@ def generate_cover(
                 raise
             break
 
-        if attempt.verify_report.ok and not attempt.repaired:
+        if attempt.verify_report.ok and not attempt.repaired and attempt.reads_well:
             break
         parts = [repair_feedback] if repair_feedback else []
         if not attempt.verify_report.ok:
@@ -501,11 +516,19 @@ def generate_cover(
                 "The rendered PDF failed its checks:\n"
                 + "\n".join(f"  - {item}" for item in attempt.verify_report.missing[:10])
             )
-        feedback = "\n\n".join(parts)
+        if attempt.review is not None:
+            parts.append(letter_review.feedback(attempt.review))
+        feedback = "\n\n".join(p for p in parts if p)
 
     best = max(
         attempts,
-        key=lambda a: (a.grounded, bool(a.verify_report and a.verify_report.ok), not a.repaired),
+        key=lambda a: (
+            a.grounded,
+            bool(a.verify_report and a.verify_report.ok),
+            a.reads_well,
+            -len(a.review.failed) if a.review else 0,
+            not a.repaired,
+        ),
     )
     if best.grounded and best is not attempts[-1]:
         best.rendered = render_cover_letter(best.document, profile, out_dir, cfg)
@@ -646,6 +669,7 @@ def build_record(
                 claims=runrecord.cover_claims(best_cover.document, index),
                 blocked_terms=list(result.cover.blocked_terms),
                 violations=[str(v) for v in best_cover.violations],
+                ats=best_cover.review.as_dict() if best_cover.review else [],
                 removed=(
                     [f"{v.where} — {v.detail}" for v in best_cover.repair.dropped]
                     if best_cover.repair
