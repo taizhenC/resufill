@@ -5,6 +5,8 @@
 //   doctor.Check / doctor.Report      -> DoctorCheck / DoctorReport
 //   runrecord.RunSummary / RunRecord  -> RunSummary / RunRecord
 //   jobs.JobState.snapshot()          -> JobSnapshot
+//   main.api_analyze()                -> Analysis
+//   document.CoverLetter              -> CoverLetterFile
 
 export interface DoctorCheck {
   name: string;
@@ -42,7 +44,10 @@ export interface StageEvent {
   parses?: boolean;
   pages?: number;
   words?: number;
+  /** ground.summarize() on `rejected`, Repair.summary() on `repaired` — e.g. `unsupported_termx2`. */
   reason?: string;
+  /** How many claims the repair cut out. Only on `repaired`. */
+  dropped?: number;
   ok?: boolean;
 }
 
@@ -79,6 +84,48 @@ export interface RunSummary {
   legacy: boolean;
 }
 
+export interface JobRecord {
+  title: string;
+  company: string;
+  seniority: string;
+  min_years: number | null;
+  hard_skills: string[];
+  keywords: string[];
+  qualifications: string[];
+}
+
+/** score.Ceiling plus the threshold it is being judged against. */
+export interface CeilingPreview {
+  total: number;
+  /** name -> raw fraction. Keyed by score component name, not labelled by the server. */
+  components: Record<string, number>;
+  /** Keywords nothing in the record supports, so no grounded document could contain them. */
+  unreachable: string[];
+  threshold: number;
+  reachable: boolean;
+}
+
+/** POST /api/analyze — the lexicon pass and the ceiling, with no model call behind either. */
+export interface Analysis {
+  deterministic: boolean;
+  jd: JobRecord;
+  ceiling: CeilingPreview;
+  /** Keywords the record already supports. */
+  covered: string[];
+}
+
+export interface LetterParagraph {
+  text: string;
+  source_ids: string[];
+}
+
+/** cover_letter.json, read straight from the run directory. */
+export interface CoverLetterFile {
+  addressee: string;
+  paragraphs: LetterParagraph[];
+  signoff: string;
+}
+
 export interface CitedSource {
   id: string;
   label: string;
@@ -107,10 +154,10 @@ export interface Gap {
   where: string;
 }
 
-// A run.json is a file on disk, not a live API. The four ceiling fields were added later, so
-// a record written before them has no such key at all — optional rather than `| null`, because
-// `ceiling: number | null` is a promise the older files on disk do not keep, and reading them
-// as though they did took the whole run view down with one `.toFixed`.
+// A run.json is a file on disk, not a live API: the four ceiling fields were added later, so a
+// record written before them has no such key at all. Optional rather than `| null` because
+// `ceiling: number | null` is a promise the older files on disk do not keep, and reading them as
+// though they did took the whole run view down with one `.toFixed`.
 export interface ScoreRecord {
   total: number;
   threshold: number;
@@ -160,27 +207,17 @@ export interface RunRecord {
   mode: string;
   ok: boolean;
   cancelled: boolean;
-  jd: {
-    title: string;
-    company: string;
-    seniority: string;
-    min_years: number | null;
-    hard_skills: string[];
-    keywords: string[];
-    qualifications: string[];
-  };
+  jd: JobRecord;
   settings: Record<string, string | number | boolean>;
   score: ScoreRecord | null;
   documents: DocumentRecord[];
-  legacy?: boolean;
+  legacy?: false;
 }
 
 /**
- * What `/api/runs/{id}` answers for a directory with no `run.json`.
- *
- * It is a `RunSummary`, not a `RunRecord` — no `jd`, no `documents`, no score. Typing the
- * endpoint as always returning the latter is what made the run view read `run.jd.title` off
- * an object that has never had a `jd`.
+ * What `/api/runs/{id}` answers with for a directory that has no run.json: the summary, and
+ * nothing else. It is a genuinely different shape — no `jd`, no `documents` — and treating it
+ * as a RunRecord took the run view down rather than showing the two facts it does have.
  */
 export interface LegacyRunRecord extends RunSummary {
   legacy: true;

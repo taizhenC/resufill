@@ -1,4 +1,12 @@
-import type { DoctorReport, JobSnapshot, LoadedRun, RunRequest, RunSummary } from "./types";
+import type {
+  Analysis,
+  CoverLetterFile,
+  DoctorReport,
+  JobSnapshot,
+  LoadedRun,
+  RunRequest,
+  RunSummary,
+} from "./types";
 
 /** A failed request that still carries what the server said, so the UI can show it. */
 export class ApiError extends Error {
@@ -35,7 +43,6 @@ export const api = {
 
   runs: () => request<{ runs: RunSummary[] }>("/api/runs").then((body) => body.runs),
 
-  /** May answer with a legacy shape — a run directory that predates run.json. */
   run: (runId: string) => request<LoadedRun>(`/api/runs/${encodeURIComponent(runId)}`),
 
   /** Only the events the caller has not seen — a long run's snapshot stays small. */
@@ -45,6 +52,14 @@ export const api = {
     request<JobSnapshot>("/api/runs", { method: "POST", body: JSON.stringify(payload) }),
 
   cancel: () => request<{ cancel_requested: boolean }>("/api/runs/current/cancel", { method: "POST" }),
+
+  /** Free: the lexicon pass and the ceiling, neither of which calls a model. Safe to fire on typing. */
+  analyze: (jd: string) => request<Analysis>("/api/analyze", { method: "POST", body: JSON.stringify({ jd }) }),
+
+  coverLetter: (runId: string) =>
+    request<CoverLetterFile>(
+      `/api/runs/${encodeURIComponent(runId)}/files/cover_letter.json`,
+    ),
 
   fileUrl: (runId: string, name: string) =>
     `/api/runs/${encodeURIComponent(runId)}/files/${encodeURIComponent(name)}`,
