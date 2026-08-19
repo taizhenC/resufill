@@ -3,6 +3,7 @@ import { useState } from "preact/hooks";
 import { api } from "../api";
 import { documentLabel } from "../run";
 import type { Claim, DocumentRecord } from "../types";
+import { CoverLetterText } from "./CoverLetterText";
 
 export function DocumentPanel({ runId, document }: { runId: string; document: DocumentRecord }) {
   const verify = document.verify;
@@ -45,7 +46,7 @@ export function DocumentPanel({ runId, document }: { runId: string; document: Do
       )}
 
       {(document.removed ?? []).length > 0 && (
-        <div class="gap-group">
+        <div class="gap-group gap-repaired">
           <h3>Removed so the rest could be kept</h3>
           <p class="field-hint">
             The draft claimed these and the record could not back them, so they were cut and what
@@ -78,9 +79,52 @@ export function DocumentPanel({ runId, document }: { runId: string; document: Do
         </div>
       )}
 
-      {document.pdf && <PdfPreview runId={runId} name={document.pdf} />}
+      <Rendered runId={runId} document={document} />
       {document.claims.length > 0 && <CitationAudit claims={document.claims} />}
     </section>
+  );
+}
+
+/**
+ * The document itself, in whichever form is about to be used.
+ *
+ * A cover letter opens as text because that is where it is going: application forms take it
+ * as a pasted textarea far more often than as an upload, and a PDF preview cannot be pasted.
+ * The PDF is one click away for the times it is the upload.
+ */
+function Rendered({ runId, document }: { runId: string; document: DocumentRecord }) {
+  const letter = document.kind === "cover_letter";
+  const [view, setView] = useState<"text" | "pdf">(letter ? "text" : "pdf");
+
+  if (!letter) return document.pdf ? <PdfPreview runId={runId} name={document.pdf} /> : null;
+
+  return (
+    <>
+      <div class="switch">
+        <button
+          type="button"
+          class="switch-option"
+          aria-pressed={view === "text"}
+          onClick={() => setView("text")}
+        >
+          Plain text
+        </button>
+        <button
+          type="button"
+          class="switch-option"
+          aria-pressed={view === "pdf"}
+          disabled={!document.pdf}
+          onClick={() => setView("pdf")}
+        >
+          PDF
+        </button>
+      </div>
+      {view === "text" ? (
+        <CoverLetterText runId={runId} />
+      ) : (
+        document.pdf && <PdfPreview runId={runId} name={document.pdf} />
+      )}
+    </>
   );
 }
 

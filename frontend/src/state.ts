@@ -2,7 +2,7 @@ import { computed, signal } from "@preact/signals";
 
 import { api, ApiError } from "./api";
 import { watch } from "./run";
-import type { DoctorReport, Mode, RunRequest } from "./types";
+import type { Analysis, DoctorReport, Mode, RunRequest } from "./types";
 
 export const doctorReport = signal<DoctorReport | null>(null);
 export const doctorError = signal<string | null>(null);
@@ -38,6 +38,63 @@ export const strict = signal(false);
 export const submitting = signal(false);
 export const submitError = signal<string | null>(null);
 export const activeRunId = signal<string | null>(null);
+
+// --- the free preview ------------------------------------------------------
+
+export const analysis = signal<Analysis | null>(null);
+export const analysisError = signal<string | null>(null);
+export const analysing = signal(false);
+
+/** Long enough that a paste is one request and typing is not one per keystroke. */
+const ANALYZE_DEBOUNCE_MS = 600;
+
+let analyzeTimer: ReturnType<typeof setTimeout> | undefined;
+// Responses can land out of order once a slow request overlaps a fast one. The last request
+// sent is the only one whose answer describes what is in the box.
+let analyzeSeq = 0;
+
+/** The only way to set the posting: every edit is also a preview trigger. */
+export function setJd(value: string): void {
+  jdText.value = value;
+  if (analyzeTimer !== undefined) clearTimeout(analyzeTimer);
+  if (!value.trim()) {
+    // Nothing to analyse, so nothing is sent and whatever is in flight is disowned.
+    analyzeSeq += 1;
+    analysis.value = null;
+    analysisError.value = null;
+    analysing.value = false;
+    return;
+  }
+  analyzeTimer = setTimeout(() => void analyze(), ANALYZE_DEBOUNCE_MS);
+}
+
+async function analyze(): Promise<void> {
+  const jd = jdText.value;
+  if (!jd.trim()) return;
+  const seq = ++analyzeSeq;
+  analysing.value = true;
+  try {
+    const result = await api.analyze(jd);
+    if (seq !== analyzeSeq) return;
+    analysis.value = result;
+    analysisError.value = null;
+  } catch (error) {
+    if (seq !== analyzeSeq) return;
+    analysis.value = null;
+    // Never fatal. The preview is a free extra; the run is the product, and its button
+    // stays live whatever happens here.
+    analysisError.value =
+      error instanceof ApiError
+        ? error.status === 412
+          ? // The one failure worth acting on: a run reads the same file and would hit the
+            // same wall, so this is not the usual "never mind, it is only the preview".
+            `The preview could not read your record. ${error.message} — a run reads the same file, so this is worth fixing first.`
+          : `${error.message} — the preview is an extra; generating still works.`
+        : "Could not reach the server for the preview. It is an extra — generating is unaffected.";
+  } finally {
+    if (seq === analyzeSeq) analysing.value = false;
+  }
+}
 
 /** Blank means "use the .env value" — an empty box is not a zero. */
 function optionalNumber(raw: string): number | null {
