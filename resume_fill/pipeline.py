@@ -33,7 +33,7 @@ from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
 
-from . import ground, runrecord
+from . import ats, ground, runrecord
 from . import report as report_module
 from . import score as score_module
 from .config import Settings
@@ -74,6 +74,7 @@ class Attempt:
     score: Score | None = None
     verify_report: VerifyReport | None = None
     rendered: Rendered | None = None
+    review: ats.AtsReport | None = None
 
     @property
     def document(self) -> ResumeDoc:
@@ -222,7 +223,8 @@ def generate(
         try:
             report(TAILORING, **where)
             doc = tailor(
-                profile, jd, corpus, llm_call, max_pages=cfg.RESUME_MAX_PAGES, feedback=feedback
+                profile, jd, corpus, llm_call, max_pages=cfg.RESUME_MAX_PAGES, feedback=feedback,
+                extra_rules=ats.TAILOR_RULES,
             )
             attempt = Attempt(number=number, doc=doc)
 
@@ -259,8 +261,17 @@ def generate(
             )
 
             report(SCORING, **where)
+            # Built here rather than inside score(): the parsing half of the rubric needs the
+            # rendered HTML and the real page count, and neither is knowable from the
+            # document alone.
+            attempt.review = ats.review(
+                rendered_doc, profile,
+                html=attempt.rendered.html_path.read_text(encoding="utf-8"),
+                page_count=attempt.rendered.page_count,
+                max_pages=cfg.RESUME_MAX_PAGES,
+            )
             attempt.score = score_module.score(
-                rendered_doc, profile, jd, index, attempt.verify_report
+                rendered_doc, profile, jd, index, attempt.verify_report, attempt.review
             )
             report(
                 SCORED, **where, score=attempt.score.total,
@@ -282,6 +293,7 @@ def generate(
             part
             for part in (
                 repair_feedback,
+                ats.feedback(attempt.review) if attempt.review else "",
                 score_module.feedback(
                     attempt.score, min(cfg.SCORE_THRESHOLD, limit.total), attempt.verify_report
                 ),
@@ -354,6 +366,7 @@ def resume_report(
         doc=best.document, profile=profile, jd=jd, index=index,
         removed=best.repair.notes() if best.repair else [],
         score=best.score or score_module.score(best.document, profile, jd, index),
+        review=best.review,
         verify_report=best.verify_report, iterations=len(result.attempts),
         threshold=cfg.SCORE_THRESHOLD, blocked_terms=result.blocked_terms,
         violations=best.violations,
@@ -618,6 +631,7 @@ def build_record(
                 blocked_terms=list(result.resume.blocked_terms),
                 violations=[str(v) for v in best.violations],
                 removed=best.repair.notes() if best.repair else [],
+                ats=best.review.as_dict() if best.review else [],
             )
         )
     if result.cover is not None:

@@ -145,7 +145,7 @@ def test_an_overlong_bullet_fails_a_format_check(example_profile):
         ]
     )
     detail = score(long_doc, example_profile, POSTING, example_profile.sources()).component("format").detail
-    assert "no bullet runs past two lines" in detail
+    assert "bullets fit two lines" in detail
 
 
 def test_a_posting_with_nothing_to_measure_does_not_score_zero(example_profile):

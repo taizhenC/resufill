@@ -106,6 +106,9 @@ class DocumentRecord(BaseModel):
     # silently absorbed, because "the résumé is shorter than you expected" is a question
     # somebody will ask, and this is the answer.
     removed: list[str] = Field(default_factory=list)
+    # The machine-readability rubric, check by check. See ats.py for what is in it and, more
+    # importantly, what is deliberately left out.
+    ats: list[dict] = Field(default_factory=list)
 
 
 class JobRecord(BaseModel):

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from datetime import date
 
+from .ats import AtsReport
 from .document import ResumeDoc
 from .ground import Violation
 from .jd import JobDescription
@@ -99,6 +100,7 @@ def build(
     removed: list[str] | None = None,
     ceiling: Ceiling | None = None,
     stop_reason: str = "",
+    review: AtsReport | None = None,
 ) -> str:
     headline = f"**{score.total:.1f} / 100** (threshold {threshold:.0f})"
     if ceiling is not None:
@@ -124,6 +126,31 @@ def build(
         "",
         *_ceiling_note(score, ceiling, threshold),
     ]
+
+    if review is not None:
+        lines += [
+            "## Machine-readability",
+            "",
+            review.summary() + ".",
+            "",
+            "| | Check | What it found |",
+            "|---|---|---|",
+        ]
+        for check in review.checks:
+            mark = "✓" if check.ok else ("✗" if check.blocking else "!")
+            lines.append(f"| {mark} | {check.name} | {check.detail} |")
+        lines.append("")
+        if review.failed:
+            lines += ["What to do about the failures:", ""]
+            lines += [f"- **{c.name}** — {c.fix}" for c in review.failed if c.fix]
+            lines.append("")
+        lines += [
+            "> `✗` affects whether a parser can read the document at all. `!` is advisory: it",
+            "> makes the résumé weaker to a human, and it never fails a build. Nothing here is a",
+            "> score an employer computes — see the header of `ats.py` for what is deliberately",
+            "> not checked, and why.",
+            "",
+        ]
 
     if verify_report is not None:
         lines += ["## Parse check", "", f"{verify_report.summary()}", ""]

@@ -22,6 +22,8 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
+from . import ats
+from .ats import AtsReport, Check
 from .document import ResumeDoc
 from .jd import JobDescription
 from .lexicon import canonical, find_terms
@@ -246,29 +248,26 @@ def _keywords_in_context(jd: JobDescription, doc: ResumeDoc) -> tuple[Component,
     )
 
 
-# Structural checks the document can fail on its own, before anything is rendered.
-MAX_BULLET_CHARS = 240
+def _format(review: AtsReport, verify_report: VerifyReport | None) -> Component:
+    """The one component that is not about the posting at all.
 
-
-def format_checks(doc: ResumeDoc, profile: Profile, report: VerifyReport | None) -> dict[str, bool]:
-    bullets = [b for _, b in doc.bullets()]
-    checks = {
-        "has an email address": bool(profile.basics.email),
-        "has at least one experience or project entry": bool(doc.experience or doc.projects),
-        "every entry has bullets": all(e.bullets for e in [*doc.experience, *doc.projects, *doc.education]),
-        "no bullet runs past two lines": all(len(b.text) <= MAX_BULLET_CHARS for b in bullets),
-        "uses standard section headings": bool(doc.ordered_sections()),
-    }
-    if report is not None:
-        checks["PDF text extracts cleanly"] = report.ok
-        checks["fits the page budget"] = report.checks.get("page_budget", True)
-    return checks
-
-
-def _format(doc: ResumeDoc, profile: Profile, report: VerifyReport | None) -> Component:
-    checks = format_checks(doc, profile, report)
-    passed = sum(1 for ok in checks.values() if ok)
-    failed = [name for name, ok in checks.items() if not ok]
+    It used to be five hand-rolled booleans about whether a bullet was too long. ats.py now
+    owns the rubric — what a parser demonstrably does with the document, and what a human
+    reviewer demonstrably does — and this reads it. Same weight (PLAN.md §4, not tuned); a
+    great deal more behind the number.
+    """
+    checks = list(review.checks)
+    if verify_report is not None:
+        checks.append(
+            Check(
+                "PDF text extracts cleanly", verify_report.ok,
+                verify_report.summary(),
+                fix="Look at resume.html next to the PDF: the first question is whether the "
+                    "bullet made it into the markup at all.",
+            )
+        )
+    passed = sum(1 for c in checks if c.ok)
+    failed = [c.name for c in checks if not c.ok]
     detail = f"{passed} of {len(checks)} checks passed"
     if failed:
         detail += "; failed: " + ", ".join(failed)
@@ -300,7 +299,18 @@ def score(
     jd: JobDescription,
     index: SourceIndex,
     report: VerifyReport | None = None,
+    review: AtsReport | None = None,
 ) -> Score:
+    """`review` is passed in when the caller already has one — the pipeline builds it with
+    the rendered HTML and the real page count, neither of which is knowable from the
+    document alone. Without it the checks that need those are simply not run, which is
+    correct: an absent check must never be scored as a passing one."""
+    if review is None:
+        review = ats.review(
+            doc, profile,
+            page_count=report.page_count if report else None,
+            max_pages=1,
+        )
     haystack = doc.searchable_text()
     hard, matched, missing = _hard_skills(jd, haystack)
     quals, unaddressed = _qualifications(jd, haystack)
@@ -312,7 +322,7 @@ def score(
     all_missing = list(dict.fromkeys(missing + missing_keywords))
 
     return Score(
-        components=[hard, quals, _title_fit(jd, doc, profile), keywords, _format(doc, profile, report)],
+        components=[hard, quals, _title_fit(jd, doc, profile), keywords, _format(review, report)],
         matched=matched,
         gaps=classify_gaps(all_missing, index),
         stuffed=stuffed,
