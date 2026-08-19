@@ -132,6 +132,20 @@ def numbers(text: str) -> list[str]:
     return out
 
 
+# Quantities a source note wrote out in words. A highlight reading "cut the nightly run
+# from three hours to twenty minutes" licenses a bullet saying 3 — the fact is written
+# down, the digits are not, and rejecting that is a grammar argument rather than a
+# grounding one. Stops at twenty plus the round tens: past that, prose uses digits.
+_NUMBER_WORDS: dict[str, float] = {
+    "zero": 0, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7,
+    "eight": 8, "nine": 9, "ten": 10, "eleven": 11, "twelve": 12, "thirteen": 13,
+    "fourteen": 14, "fifteen": 15, "sixteen": 16, "seventeen": 17, "eighteen": 18,
+    "nineteen": 19, "twenty": 20, "thirty": 30, "forty": 40, "fifty": 50, "sixty": 60,
+    "seventy": 70, "eighty": 80, "ninety": 90, "hundred": 100, "thousand": 1000,
+    "million": 1_000_000, "billion": 1_000_000_000,
+}
+
+
 def numeral_of(claim: str) -> str:
     """"40%" -> "40", "12,000" -> "12000". The bare figure, which is what has to appear in
     the source. Commas go first, or "12,000" would reduce to "12"."""
@@ -157,7 +171,13 @@ def supports_number(haystack: str, claim: str) -> bool:
         target = float(numeral)
     except ValueError:
         return False
-    return any(abs(float(n) - target) < 1e-9 for n in re.findall(r"\d+(?:\.\d+)?", hay))
+    if any(abs(float(n) - target) < 1e-9 for n in re.findall(r"\d+(?:\.\d+)?", hay)):
+        return True
+    # ...and so does the same quantity written out in words.
+    return any(
+        abs(value - target) < 1e-9 and re.search(rf"(?<![a-z]){word}(?![a-z])", hay)
+        for word, value in _NUMBER_WORDS.items()
+    )
 
 
 def sentences(text: str) -> list[str]:

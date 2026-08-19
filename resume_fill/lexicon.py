@@ -187,6 +187,24 @@ def base_forms(term: str) -> tuple[str, ...]:
             return (term[: -len(suffix)],)
     return ()
 
+
+# The same idea pointed the other way, and a much shorter list. A source note reading
+# "Dockerised the worker" says Docker; the claim side is where the risk lives, because
+# growing a tool name into a word is how "Spark" comes to be licensed by "sparked
+# interest". Only the suffixes that build a verb out of a proper noun are here — "-ed" and
+# "-ing" are not, and that is the whole reason this list differs from _DERIVATIONS.
+_TOOL_VERBS = ("ized", "ised", "ization", "isation", "ify")
+
+
+def derived_forms(term: str) -> tuple[str, ...]:
+    """"Docker" -> ("Dockerized", "Dockerised", ...). Spellings of a source that would still
+    be naming this tool. Multi-word terms and two-letter names are skipped: "Go" grows into
+    far too much."""
+    if not term or " " in term or len(term) < 3:
+        return ()
+    stem = term[:-1] if term.endswith("e") else term
+    return tuple(dict.fromkeys(stem + suffix for suffix in _TOOL_VERBS))
+
 # A token that is technical on its face even though nobody curated it: an ALLCAPS acronym,
 # a CamelCase product name, a version-tagged tool (Python3, H100, GPT-4), a dotted or
 # suffixed package (foo.js, C++). Used by ground.py so a bullet cannot smuggle in

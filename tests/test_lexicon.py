@@ -1,4 +1,11 @@
-from resume_fill.lexicon import base_forms, canonical, equivalents, find_terms, technical_tokens
+from resume_fill.lexicon import (
+    base_forms,
+    canonical,
+    derived_forms,
+    equivalents,
+    find_terms,
+    technical_tokens,
+)
 
 
 def test_canonical_folds_the_variants_a_posting_and_a_resume_spell_differently():
@@ -88,3 +95,20 @@ def test_base_forms_strips_one_derivation_not_two():
 def test_base_forms_leaves_a_name_that_merely_ends_in_a_suffix_alone():
     assert base_forms("Kubernetes") == ()
     assert base_forms("Redis") == ()
+
+
+def test_derived_forms_grows_a_tool_name_into_a_verb():
+    assert "Dockerized" in derived_forms("Docker")
+    assert "Dockerised" in derived_forms("Docker")
+
+
+def test_derived_forms_refuses_the_endings_that_would_swallow_ordinary_words():
+    """"sparked interest" must never license Spark, so -ed and -ing are not on the list."""
+    grown = derived_forms("Spark")
+    assert "Sparked" not in grown
+    assert "Sparking" not in grown
+
+
+def test_derived_forms_skips_names_too_short_to_grow_safely():
+    assert derived_forms("Go") == ()
+    assert derived_forms("machine learning") == ()
