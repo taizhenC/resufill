@@ -332,7 +332,10 @@ def _report_resume(result, cfg) -> int:
         for note in best.repair.notes()[:6]:
             print(f"     - {note}")
     print(f"{INFO} {best.verify_report.summary()}")
-    print(f"{INFO} score {best.total:.1f} / 100 (threshold {result.threshold:.0f})")
+    print(
+        f"{INFO} score {best.total:.1f} of a reachable {result.reachable:.1f} "
+        f"(threshold {result.threshold:.0f}) - stopped because {result.why_stopped()}"
+    )
     for component in best.score.components:
         print(f"       {component.points:5.1f}  {component.label} - {component.detail}")
 
@@ -346,12 +349,30 @@ def _report_resume(result, cfg) -> int:
     if not result.ok:
         print(f"{BAD} the PDF did not survive its own parse check - fix before sending")
         return 1
-    if not result.met_threshold:
-        message = f"score is below the threshold ({best.total:.1f} < {result.threshold:.0f})"
-        if cfg.STRICT_SCORE:
-            print(f"{BAD} {message}; STRICT_SCORE is on")
-            return 1
-        print(f"{WARN} {message}. Nothing was invented to close it - see the gap list in report.md.")
+    if result.met_threshold:
+        return 0
+    if not result.threshold_reachable:
+        # The threshold was never available to this record. Calling that a failure - even
+        # under STRICT_SCORE - would be scoring the candidate on experience they were never
+        # claimed to have, which is the one thing this tool exists not to do.
+        print(
+            f"{INFO} the threshold of {result.threshold:.0f} was not reachable for this record: "
+            f"this posting caps at {result.reachable:.1f}. "
+            + (
+                "Out of reach: " + ", ".join(result.ceiling.unreachable[:8])
+                if result.ceiling and result.ceiling.unreachable
+                else ""
+            )
+        )
+        return 0
+    message = (
+        f"score is below the threshold ({best.total:.1f} < {result.threshold:.0f}), and "
+        f"{result.reachable:.1f} was reachable - this one is tailoring, not the record"
+    )
+    if cfg.STRICT_SCORE:
+        print(f"{BAD} {message}; STRICT_SCORE is on")
+        return 1
+    print(f"{WARN} {message}. See the unsurfaced keywords in report.md.")
     return 0
 
 

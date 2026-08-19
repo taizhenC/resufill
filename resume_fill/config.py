@@ -57,6 +57,18 @@ class Settings(BaseSettings):
     # a stopping rule for the loop, not a quality bar anyone else will apply.
     SCORE_THRESHOLD: float = 80.0
     MAX_ITER: int = 4
+    # The threshold is an aspiration; the *ceiling* is what this record can actually reach
+    # against this posting (score.ceiling). A posting wanting three technologies the record
+    # has never touched caps the score before a word is written, and ground.py guarantees no
+    # rewrite can lift it. Iterating towards an unreachable number is how a run spends four
+    # LLM calls to arrive at the answer the first one already gave.
+    #
+    # So the loop also stops within this much of the ceiling...
+    CEILING_SLACK: float = 2.0
+    # ...and when an iteration stops buying anything. A rewrite that gains less than this is
+    # noise: the feedback pushes on gaps, and past a point pushing only trades one keyword
+    # for another.
+    MIN_GAIN: float = 1.5
     # A low ceiling that ground.py refused to inflate is *information* — the role wants
     # things you have not done. Default is to emit anyway and say so in report.md.
     STRICT_SCORE: bool = False

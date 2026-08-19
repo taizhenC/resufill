@@ -58,7 +58,7 @@ from .progress import (
     Progress,
 )
 from .render import Rendered, render_cover_letter, render_resume
-from .score import Score
+from .score import Ceiling, Score
 from .source import SourceIndex
 from .verify import VerifyReport, verify, verify_letter
 
@@ -117,6 +117,19 @@ class Attempt:
         return ", ".join(parts)
 
 
+# Why the loop stopped. Recorded rather than inferred: "4 iterations" and "1 iteration"
+# look identical in a report unless it says which of these happened, and they mean opposite
+# things about whether spending more would have helped.
+STOP_REASONS = {
+    "threshold": "the score reached the threshold",
+    "ceiling": "the score reached what this record can reach for this posting",
+    "plateau": "another rewrite stopped buying anything",
+    "exhausted": "the iteration budget ran out",
+    "ungrounded": "no draft survived the grounding gate",
+    "cancelled": "the run was cancelled",
+}
+
+
 @dataclass
 class RunResult:
     out_dir: Path
@@ -126,6 +139,10 @@ class RunResult:
     blocked_terms: list[str]
     threshold: float
     cancelled: bool = False
+    # What this record could reach for this posting, and how close counts as arrival.
+    ceiling: Ceiling | None = None
+    slack: float = 2.0
+    stop_reason: str = "exhausted"
 
     @property
     def ok(self) -> bool:
@@ -136,6 +153,27 @@ class RunResult:
     @property
     def met_threshold(self) -> bool:
         return self.best.total >= self.threshold
+
+    @property
+    def reachable(self) -> float:
+        """The highest score this record could have got for this posting."""
+        return self.ceiling.total if self.ceiling else 100.0
+
+    @property
+    def at_ceiling(self) -> bool:
+        """The loop got everything out of the record that was there to get.
+
+        This is the number that means something when the threshold was never reachable, and
+        it is a success rather than the failure "below threshold" reads as.
+        """
+        return self.ceiling is not None and self.best.total >= self.ceiling.total - self.slack
+
+    @property
+    def threshold_reachable(self) -> bool:
+        return self.ceiling is None or self.ceiling.is_reachable(self.threshold)
+
+    def why_stopped(self) -> str:
+        return STOP_REASONS.get(self.stop_reason, self.stop_reason)
 
 
 def run_dir(jd: JobDescription, cfg: Settings, *, today: date | None = None) -> Path:
@@ -173,6 +211,10 @@ def generate(
     cancelled = False
     out_dir.mkdir(parents=True, exist_ok=True)
     total = max(1, cfg.MAX_ITER)
+    # Computed once, before any model call: it depends only on the record and the posting.
+    limit = score_module.ceiling(profile, jd, index)
+    stop_reason = ""
+    previous_best = -1.0
 
     for number in range(1, total + 1):
         where = {"document": "resume", "attempt": number, "attempts": total}
@@ -232,22 +274,26 @@ def generate(
                 raise
             break
 
-        # Repaired or not: the document that exists is grounded, parses and clears the
-        # threshold. Spending another LLM call hoping for an uncut version of the same score
-        # is what made this loop expensive, and rank() already prefers the uncut one when
-        # both exist.
-        if attempt.verify_report.ok and attempt.score.total >= cfg.SCORE_THRESHOLD:
+        stop_reason = _stop_reason(attempt, previous_best, limit, cfg)
+        previous_best = max(previous_best, attempt.total)
+        if stop_reason:
             break
         feedback = "\n\n".join(
             part
             for part in (
                 repair_feedback,
-                score_module.feedback(attempt.score, cfg.SCORE_THRESHOLD, attempt.verify_report),
+                score_module.feedback(
+                    attempt.score, min(cfg.SCORE_THRESHOLD, limit.total), attempt.verify_report
+                ),
             )
             if part
         )
 
     best = max(attempts, key=lambda a: a.rank())
+    if not stop_reason:
+        stop_reason = (
+            "cancelled" if cancelled else "ungrounded" if not best.grounded else "exhausted"
+        )
 
     # The last attempt rendered is the one sitting on disk. If it was not the best one,
     # render the best again so the PDF matches the report that describes it.
@@ -266,6 +312,7 @@ def generate(
     result = RunResult(
         out_dir=out_dir, attempts=attempts, best=best, report_path=out_dir / "report.md",
         blocked_terms=blocked, threshold=cfg.SCORE_THRESHOLD, cancelled=cancelled,
+        ceiling=limit, slack=cfg.CEILING_SLACK, stop_reason=stop_reason,
     )
     if write_report:
         # `run()` writes a combined report when a cover letter is in play, so it asks for
@@ -274,6 +321,29 @@ def generate(
             resume_report(result, profile, jd, index, cfg), encoding="utf-8"
         )
     return result
+
+
+def _stop_reason(attempt: Attempt, previous_best: float, limit: Ceiling, cfg: Settings) -> str:
+    """Is there any point in another iteration? Empty string means yes.
+
+    Three ways to be finished, and the second and third are the ones that were missing. The
+    threshold alone is a rule the loop frequently *cannot* satisfy: it is a fixed number, and
+    what a record can reach against a posting is not. A run that wants 80, tops out at 64,
+    and spends four model calls discovering that on every attempt has learned nothing after
+    the first one — and ground.py is what guarantees it could never have done better, which
+    is exactly why stopping there is honest rather than lazy.
+    """
+    if attempt.score is None or attempt.verify_report is None or not attempt.verify_report.ok:
+        # A PDF that does not parse is worth another attempt regardless of its score: that
+        # is the one thing this tool actually promises.
+        return ""
+    if attempt.score.total >= cfg.SCORE_THRESHOLD:
+        return "threshold"
+    if attempt.score.total >= limit.total - cfg.CEILING_SLACK:
+        return "ceiling"
+    if previous_best >= 0 and attempt.score.total - previous_best < cfg.MIN_GAIN:
+        return "plateau"
+    return ""
 
 
 def resume_report(
@@ -287,6 +357,7 @@ def resume_report(
         verify_report=best.verify_report, iterations=len(result.attempts),
         threshold=cfg.SCORE_THRESHOLD, blocked_terms=result.blocked_terms,
         violations=best.violations,
+        ceiling=result.ceiling, stop_reason=result.why_stopped(),
     )
 
 
@@ -579,13 +650,18 @@ def build_record(
         settings={
             "threshold": cfg.SCORE_THRESHOLD,
             "max_iter": cfg.MAX_ITER,
+            "ceiling_slack": cfg.CEILING_SLACK,
+            "min_gain": cfg.MIN_GAIN,
             "resume_max_pages": cfg.RESUME_MAX_PAGES,
             "cover_letter_words": cfg.COVER_LETTER_WORDS,
             "strict_score": cfg.STRICT_SCORE,
             "model": cfg.LLM_MODEL,
         },
         score=runrecord.score_record(
-            result.resume.best.score if result.resume else None, cfg.SCORE_THRESHOLD
+            result.resume.best.score if result.resume else None, cfg.SCORE_THRESHOLD,
+            ceiling=result.resume.ceiling if result.resume else None,
+            stop_reason=result.resume.stop_reason if result.resume else "",
+            slack=cfg.CEILING_SLACK,
         ),
         documents=documents,
     )

@@ -25,7 +25,7 @@ from pydantic import BaseModel, Field
 
 from .document import CoverLetter, ResumeDoc
 from .jd import JobDescription
-from .score import Score
+from .score import Ceiling, Score
 from .source import SourceIndex
 from .verify import VerifyReport
 
@@ -68,6 +68,13 @@ class ScoreRecord(BaseModel):
     total: float
     threshold: float
     met: bool
+    # The highest score this record could have reached for this posting, and whether the run
+    # got there. Without it, `total` below `threshold` is unreadable: it could be a tailoring
+    # miss or it could be the only honest answer available.
+    ceiling: float | None = None
+    at_ceiling: bool = False
+    unreachable: list[str] = Field(default_factory=list)
+    stop_reason: str = ""
     components: list[ComponentRecord] = Field(default_factory=list)
     matched: list[str] = Field(default_factory=list)
     # Split at write time rather than at read time: the two lists mean different things and
@@ -178,13 +185,24 @@ def verify_record(report: VerifyReport | None) -> VerifyRecord | None:
     )
 
 
-def score_record(score: Score | None, threshold: float) -> ScoreRecord | None:
+def score_record(
+    score: Score | None,
+    threshold: float,
+    *,
+    ceiling: Ceiling | None = None,
+    stop_reason: str = "",
+    slack: float = 2.0,
+) -> ScoreRecord | None:
     if score is None:
         return None
     return ScoreRecord(
         total=score.total,
         threshold=threshold,
         met=score.total >= threshold,
+        ceiling=ceiling.total if ceiling else None,
+        at_ceiling=bool(ceiling and score.total >= ceiling.total - slack),
+        unreachable=list(ceiling.unreachable) if ceiling else [],
+        stop_reason=stop_reason,
         components=[
             ComponentRecord(
                 name=c.name, label=c.label, weight=c.weight, raw=c.raw,
