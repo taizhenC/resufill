@@ -32,8 +32,9 @@ Four rules, in order of how often they catch something real:
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from .document import CoverLetter, LinkedInDraft, ResumeDoc
 from .lexicon import base_forms, derived_forms, equivalents, technical_tokens
@@ -55,6 +56,10 @@ class Violation:
     kind: str
     where: str
     detail: str
+    # The exact thing that was wrong — the term, the figure, the skill, the id. `detail` is
+    # a sentence for a person to read; this is the same fact for code, so that repair() and
+    # the gap report do not have to pull a quoted substring back out of English prose.
+    subject: str = ""
 
     def __str__(self) -> str:
         return f"{self.where}: {self.detail}"
@@ -77,6 +82,7 @@ def _claims_against(
                 Violation(
                     "unsupported_number", where,
                     f'the figure "{claim}" does not appear in the cited source',
+                    subject=claim,
                 )
             )
     for term in technical_tokens(text):
@@ -86,6 +92,7 @@ def _claims_against(
             Violation(
                 "unsupported_term", where,
                 f'"{term}" is not in the cited source and is not declared in profile.skills',
+                subject=term,
             )
         )
     return found
@@ -230,6 +237,7 @@ def _check_skills(doc: ResumeDoc, profile: Profile) -> list[Violation]:
                     Violation(
                         "undeclared_skill", f"skills[{category}]",
                         f'"{skill}" is not listed in profile.skills or on any highlight',
+                        subject=skill,
                     )
                 )
     return found
@@ -341,6 +349,187 @@ def check_linkedin(draft: LinkedInDraft, profile: Profile, index: SourceIndex) -
     return violations
 
 
+# -------------------------------------------------------------- repair ----
+
+# Violations confined to one bullet. Removing the bullet removes the claim, and the rest of
+# the document is untouched and still true.
+_BULLET_LEVEL = frozenset({
+    "unsupported_number", "unsupported_term", "uncited_bullet", "unknown_source",
+    "misattributed_bullet", "empty_bullet",
+})
+# Violations about the entry itself. Its bullets go with it — they were describing a job
+# that is not going on the page.
+_ENTRY_LEVEL = frozenset({"unknown_entry", "wrong_section", "empty_entry"})
+
+_LOCATOR = re.compile(
+    r"^(?P<section>[a-z_]+)(?:\[(?P<key>[^\]]*)\])?(?:\.bullet(?P<bullet>\d+))?$"
+)
+_PARAGRAPH = re.compile(r"^paragraph(?P<index>\d+)$")
+
+
+@dataclass
+class Repair:
+    """A rejected draft with the unsupportable parts cut out of it.
+
+    The gate stays absolute — nothing here weakens what may be claimed. What changes is the
+    *cost of being wrong*: one bad token in one bullet used to throw away fifteen good ones
+    and a whole iteration with them, and with MAX_ITER at 4 that meant three unlucky drafts
+    produced no document at all. A résumé missing one bullet is worth more than no résumé.
+
+    `remaining` is what could not be cut away — a document that is wrong in a way removal
+    does not fix (nothing left, or a violation whose location cannot be located). That is
+    still a rejection, and the loop still retries it.
+    """
+
+    doc: ResumeDoc
+    dropped: list[Violation] = field(default_factory=list)
+    remaining: list[Violation] = field(default_factory=list)
+
+    @property
+    def changed(self) -> bool:
+        return bool(self.dropped)
+
+    @property
+    def ok(self) -> bool:
+        """Usable: everything unsupportable is gone and there is still a résumé here."""
+        return not self.remaining and not self.doc.is_empty()
+
+    def summary(self) -> str:
+        if not self.changed:
+            return "nothing to repair"
+        counts: dict[str, int] = {}
+        for violation in self.dropped:
+            counts[violation.kind] = counts.get(violation.kind, 0) + 1
+        return ", ".join(f"{k}x{v}" for k, v in sorted(counts.items()))
+
+    def notes(self) -> list[str]:
+        """One line per removal, for report.md. What was cut is the honest half of the
+        result: it is the list of things the record could not back."""
+        return [f"{v.where} — {v.detail}" for v in self.dropped]
+
+
+def repair(
+    doc: ResumeDoc, profile: Profile, index: SourceIndex, violations: list[Violation]
+) -> Repair:
+    """Cut the unsupportable parts out of a rejected draft and re-check what is left.
+
+    Removal only. Nothing is rewritten, nothing is substituted, and no claim survives that
+    check() rejected — the returned document goes back through the same gate, and
+    `remaining` is whatever it still fails on.
+    """
+    drop_entries: set[str] = set()
+    drop_bullets: set[tuple[str, int]] = set()
+    drop_skills: set[tuple[str, str]] = set()
+    drop_certs: set[str] = set()
+    clear: set[str] = set()
+    acted: list[Violation] = []
+
+    for violation in violations:
+        match = _LOCATOR.match(violation.where)
+        if match is None:
+            continue
+        section, key, bullet = match.group("section"), match.group("key"), match.group("bullet")
+        if section in ("summary", "headline"):
+            clear.add(section)
+        elif section == "skills" and violation.kind == "undeclared_skill" and violation.subject:
+            drop_skills.add((key or "", violation.subject))
+        elif section == "certifications":
+            drop_certs.add(key or "")
+        elif violation.kind in _ENTRY_LEVEL:
+            drop_entries.add(f"{section}[{key}]")
+        elif violation.kind in _BULLET_LEVEL and bullet is not None:
+            drop_bullets.add((f"{section}[{key}]", int(bullet)))
+        else:
+            continue
+        acted.append(violation)
+
+    repaired = doc.model_copy(deep=True)
+    for section, entries in repaired.entry_groups():
+        kept = []
+        for entry in entries:
+            where = f"{section}[{entry.source_id}]"
+            if where in drop_entries:
+                continue
+            entry.bullets = [
+                bullet
+                for i, bullet in enumerate(entry.bullets, start=1)
+                if (where, i) not in drop_bullets
+            ]
+            # An entry with every bullet cut is a company name and a date with nothing under
+            # it. check() calls that empty_entry; there is no reason to print it either.
+            if entry.bullets:
+                kept.append(entry)
+        entries[:] = kept
+
+    for category, skill in drop_skills:
+        if category in repaired.skills:
+            repaired.skills[category] = [
+                s for s in repaired.skills[category] if s.casefold() != skill.casefold()
+            ]
+    repaired.skills = {k: v for k, v in repaired.skills.items() if v}
+    if drop_certs:
+        repaired.certification_ids = [c for c in repaired.certification_ids if c not in drop_certs]
+    if "summary" in clear:
+        repaired.summary = ""
+        repaired.summary_source_ids = []
+    if "headline" in clear:
+        repaired.headline = ""
+
+    return Repair(doc=repaired, dropped=acted, remaining=check(repaired, profile, index))
+
+
+@dataclass
+class LetterRepair:
+    """The same idea for the cover letter, one level coarser.
+
+    Coarser also means costlier: cutting a paragraph out of a four-paragraph letter removes
+    a quarter of it. So a repaired letter still has to be a letter — two paragraphs is the
+    floor, below which the right answer is to write it again rather than ship a fragment.
+    """
+
+    letter: CoverLetter
+    dropped: list[Violation] = field(default_factory=list)
+    remaining: list[Violation] = field(default_factory=list)
+
+    MIN_PARAGRAPHS = 2
+
+    @property
+    def changed(self) -> bool:
+        return bool(self.dropped)
+
+    @property
+    def ok(self) -> bool:
+        return not self.remaining and len(self.letter.paragraphs) >= self.MIN_PARAGRAPHS
+
+
+def repair_letter(
+    letter: CoverLetter,
+    profile: Profile,
+    index: SourceIndex,
+    violations: list[Violation],
+    *,
+    allowed_terms: Iterable[str] = (),
+) -> LetterRepair:
+    drop: set[int] = set()
+    acted: list[Violation] = []
+    for violation in violations:
+        match = _PARAGRAPH.match(violation.where)
+        if match is None:
+            continue
+        drop.add(int(match.group("index")))
+        acted.append(violation)
+
+    repaired = letter.model_copy(deep=True)
+    repaired.paragraphs = [
+        paragraph for i, paragraph in enumerate(letter.paragraphs, start=1) if i not in drop
+    ]
+    return LetterRepair(
+        letter=repaired,
+        dropped=acted,
+        remaining=check_letter(repaired, profile, index, allowed_terms=allowed_terms),
+    )
+
+
 # --------------------------------------------------------------- retry ----
 
 _ADVICE = {
@@ -392,8 +581,7 @@ def unsupported_terms(violations: list[Violation]) -> list[str]:
     and report.md prints them as such."""
     out = []
     for violation in violations:
-        if violation.kind == "unsupported_term":
-            term = violation.detail.split('"')[1] if '"' in violation.detail else violation.detail
-            if normalize(term) not in {normalize(t) for t in out}:
-                out.append(term)
+        if violation.kind == "unsupported_term" and violation.subject:
+            if normalize(violation.subject) not in {normalize(t) for t in out}:
+                out.append(violation.subject)
     return out

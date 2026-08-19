@@ -111,6 +111,14 @@ export interface ScoreRecord {
   total: number;
   threshold: number;
   met: boolean;
+  /** The highest score this record could reach for this posting. Null on older runs. */
+  ceiling: number | null;
+  /** The loop got everything out of the record there was to get. */
+  at_ceiling: boolean;
+  /** Keywords no grounded document could ever contain, because the record has not got them. */
+  unreachable: string[];
+  /** Which stopping rule ended the loop: threshold | ceiling | plateau | exhausted | ... */
+  stop_reason: string;
   components: ScoreComponent[];
   matched: string[];
   /** Not in the record at all — a fact about you, which no rewrite closes. */
@@ -137,6 +145,8 @@ export interface DocumentRecord {
   claims: Claim[];
   blocked_terms: string[];
   violations: string[];
+  /** What the gate cut out of the draft so the rest could be kept. */
+  removed: string[];
 }
 
 export interface RunRecord {

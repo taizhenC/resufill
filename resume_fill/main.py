@@ -24,11 +24,13 @@ from pydantic import BaseModel, Field
 
 from . import doctor, evidence, llm, runrecord
 from . import jd as jd_module
+from . import score as score_module
 from .config import PACKAGE_DIR, settings
 from .jobs import Busy, JobRunner, JobState
-from .pipeline import MODES, run, run_dir
+from .pipeline import MODES, run, run_dir, source_index
 from .profile import ProfileError, load_profile
 from .progress import PARSING_JD, Progress
+from .textutil import contains_term
 
 WEBUI_DIR = PACKAGE_DIR / "webui"
 LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost", ""}
@@ -175,6 +177,57 @@ def api_run_file(run_id: str, name: str):
         # inline so the browser renders the PDF rather than downloading it
         headers={"Content-Disposition": f'inline; filename="{name}"'},
     )
+
+
+# -------------------------------------------------------------- analysis ----
+
+
+class AnalyzeRequest(BaseModel):
+    jd: str = Field(min_length=1)
+
+
+@app.post("/api/analyze")
+def api_analyze(request: AnalyzeRequest):
+    """What this posting asks for and how far the record can get — before spending anything.
+
+    Deliberately free. It runs jd.parse_deterministic (the lexicon pass, no model) and
+    score.ceiling (the record and the posting, no model), so pasting a posting costs nothing
+    and answers the question people actually open the tool with: *is this one worth
+    applying to, and what will it say I am missing?*
+
+    Running the full loop to find that out costs money and a minute, and the answer to "the
+    posting wants three things your record has never contained" does not improve for having
+    been paid for.
+    """
+    job = jd_module.parse_deterministic(request.jd)
+    try:
+        profile = load_profile(settings.PROFILE_PATH)
+    except ProfileError as exc:
+        raise HTTPException(status_code=412, detail=str(exc)) from exc
+
+    index = source_index(profile, evidence.load(settings.EVIDENCE_PATH))
+    limit = score_module.ceiling(profile, job, index)
+    haystack = score_module.record_text(profile, index)
+    unreachable = {t.casefold() for t in limit.unreachable}
+    covered = [
+        term for term in dict.fromkeys([*job.hard_skills, *job.keywords])
+        if term.casefold() not in unreachable and contains_term(haystack, term)
+    ]
+
+    return {
+        # Marked so the UI can say "no model was asked" rather than implying the LLM pass
+        # (which fills in a title the lexicon missed, and adds keywords) already happened.
+        "deterministic": True,
+        "jd": runrecord.job_record(job).model_dump(),
+        "ceiling": {
+            "total": limit.total,
+            "components": limit.components,
+            "unreachable": limit.unreachable,
+            "threshold": settings.SCORE_THRESHOLD,
+            "reachable": limit.is_reachable(settings.SCORE_THRESHOLD),
+        },
+        "covered": covered,
+    }
 
 
 # ------------------------------------------------------------- execution ----

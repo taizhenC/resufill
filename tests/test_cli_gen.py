@@ -3,7 +3,7 @@ import json
 import pytest
 from conftest import needs_chromium
 from test_cover import LETTER
-from test_pipeline import FABRICATED, HONEST
+from test_pipeline import HONEST, MIDDLING, UNSALVAGEABLE
 
 from resume_fill.cli import main
 
@@ -73,7 +73,7 @@ def test_gen_writes_the_pdf_the_json_and_the_report(wired, capsys):
 
 @needs_chromium
 def test_gen_exits_nonzero_when_nothing_could_be_grounded(wired, capsys):
-    wired["responses"].append(FABRICATED)
+    wired["responses"].append(UNSALVAGEABLE)
     code = main(["gen", "--jd", wired["jd"], "--out", str(wired["tmp_path"] / "run"),
                  "--resume", "--max-iter", "1"])
 
@@ -148,27 +148,45 @@ def test_a_fabricated_cover_letter_fails_the_run(wired, capsys):
 
 
 @needs_chromium
-def test_an_honest_low_score_warns_but_succeeds(wired, capsys):
+def test_an_unreachable_threshold_is_reported_as_unreachable_not_as_a_shortfall(wired, capsys):
     """PLAN.md open question 5, resolved: the gate stopped the loop inflating the number,
-    so a low ceiling is the answer, not a failure."""
+    so a low ceiling is the answer, not a failure. Saying "below the threshold" made the
+    answer read as the failure it is not."""
     wired["responses"].append(HONEST)
     code = main(["gen", "--jd", wired["jd"], "--out", str(wired["tmp_path"] / "run"),
                  "--resume", "--threshold", "99", "--max-iter", "1"])
 
     assert code == 0
     printed = capsys.readouterr().out
-    assert "below the threshold" in printed
-    assert "Nothing was invented to close it" in printed
+    assert "was not reachable for this record" in printed
+    assert "caps at 71.2" in printed
+    assert "Kubernetes" in printed
 
 
 @needs_chromium
-def test_strict_turns_a_low_score_into_a_failure(wired, capsys):
+def test_strict_does_not_fail_a_run_for_missing_an_impossible_number(wired, capsys):
+    """Failing here would be scoring the candidate on experience nobody claimed they had,
+    which is the one thing this tool exists not to do."""
     wired["responses"].append(HONEST)
     code = main(["gen", "--jd", wired["jd"], "--out", str(wired["tmp_path"] / "run"),
                  "--resume", "--threshold", "99", "--max-iter", "1", "--strict"])
 
+    assert code == 0
+    assert "STRICT_SCORE is on" not in capsys.readouterr().out
+
+
+@needs_chromium
+def test_strict_turns_a_reachable_shortfall_into_a_failure(wired, capsys):
+    """71.2 was available and the draft got 46.2. That gap is tailoring, and STRICT_SCORE
+    exists for exactly this case."""
+    wired["responses"].append(MIDDLING)
+    code = main(["gen", "--jd", wired["jd"], "--out", str(wired["tmp_path"] / "run"),
+                 "--resume", "--threshold", "70", "--max-iter", "1", "--strict"])
+
     assert code == 1
-    assert "STRICT_SCORE is on" in capsys.readouterr().out
+    printed = capsys.readouterr().out
+    assert "STRICT_SCORE is on" in printed
+    assert "tailoring, not the record" in printed
 
 
 def test_gen_without_credentials_says_what_to_set(monkeypatch, tmp_path, capsys):

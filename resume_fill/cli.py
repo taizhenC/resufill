@@ -260,6 +260,7 @@ def cmd_gen(args: argparse.Namespace) -> int:
 _STAGE_LABEL = {
     "tailoring": "writing",
     "grounding": "checking every claim",
+    "repaired": "kept what could be supported, cut the rest",
     "rejected": "rejected",
     "rendering": "rendering PDF",
     "verifying": "reading the PDF back",
@@ -292,9 +293,13 @@ def _report_cover(cover_run) -> int:
         for violation in best.violations[:10]:
             print(f"     - [{violation.kind}] {violation}")
         return 1
+    letter = best.document
     print(f"{OK} {best.rendered.pdf_path}")
-    print(f"{INFO} {best.letter.word_count()} words, {len(best.letter.paragraphs)} paragraphs, "
-          f"addressed to {best.letter.addressee}")
+    print(f"{INFO} {letter.word_count()} words, {len(letter.paragraphs)} paragraphs, "
+          f"addressed to {letter.addressee}")
+    if best.repair is not None and best.repair.dropped:
+        print(f"{WARN} {len(best.repair.dropped)} paragraph(s) removed - they claimed more "
+              "than the record supports")
     if cover_run.blocked_terms:
         print(f"{INFO} the gate blocked these claims: " + ", ".join(cover_run.blocked_terms[:12]))
     if not cover_run.ok:
@@ -320,8 +325,17 @@ def _report_resume(result, cfg) -> int:
         return 1
 
     print(f"{OK} {best.rendered.pdf_path}")
+    if best.repair is not None and best.repair.dropped:
+        # Not a failure and not silent either: the résumé is smaller than the model drafted,
+        # and the difference is the list of things the record could not back.
+        print(f"{WARN} {len(best.repair.dropped)} item(s) cut to keep every claim supported:")
+        for note in best.repair.notes()[:6]:
+            print(f"     - {note}")
     print(f"{INFO} {best.verify_report.summary()}")
-    print(f"{INFO} score {best.total:.1f} / 100 (threshold {result.threshold:.0f})")
+    print(
+        f"{INFO} score {best.total:.1f} of a reachable {result.reachable:.1f} "
+        f"(threshold {result.threshold:.0f}) - stopped because {result.why_stopped()}"
+    )
     for component in best.score.components:
         print(f"       {component.points:5.1f}  {component.label} - {component.detail}")
 
@@ -335,12 +349,30 @@ def _report_resume(result, cfg) -> int:
     if not result.ok:
         print(f"{BAD} the PDF did not survive its own parse check - fix before sending")
         return 1
-    if not result.met_threshold:
-        message = f"score is below the threshold ({best.total:.1f} < {result.threshold:.0f})"
-        if cfg.STRICT_SCORE:
-            print(f"{BAD} {message}; STRICT_SCORE is on")
-            return 1
-        print(f"{WARN} {message}. Nothing was invented to close it - see the gap list in report.md.")
+    if result.met_threshold:
+        return 0
+    if not result.threshold_reachable:
+        # The threshold was never available to this record. Calling that a failure - even
+        # under STRICT_SCORE - would be scoring the candidate on experience they were never
+        # claimed to have, which is the one thing this tool exists not to do.
+        print(
+            f"{INFO} the threshold of {result.threshold:.0f} was not reachable for this record: "
+            f"this posting caps at {result.reachable:.1f}. "
+            + (
+                "Out of reach: " + ", ".join(result.ceiling.unreachable[:8])
+                if result.ceiling and result.ceiling.unreachable
+                else ""
+            )
+        )
+        return 0
+    message = (
+        f"score is below the threshold ({best.total:.1f} < {result.threshold:.0f}), and "
+        f"{result.reachable:.1f} was reachable - this one is tailoring, not the record"
+    )
+    if cfg.STRICT_SCORE:
+        print(f"{BAD} {message}; STRICT_SCORE is on")
+        return 1
+    print(f"{WARN} {message}. See the unsurfaced keywords in report.md.")
     return 0
 
 

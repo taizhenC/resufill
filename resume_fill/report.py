@@ -11,11 +11,12 @@ from __future__ import annotations
 
 from datetime import date
 
+from .ats import AtsReport
 from .document import ResumeDoc
 from .ground import Violation
 from .jd import JobDescription
 from .profile import Profile
-from .score import Score
+from .score import Ceiling, Score
 from .source import SourceIndex
 from .verify import VerifyReport
 
@@ -32,6 +33,41 @@ def _table(score: Score) -> list[str]:
         )
     rows.append(f"| **Total** | | | **{score.total:.1f}** | |")
     return rows
+
+
+def _ceiling_note(score: Score, ceiling: Ceiling | None, threshold: float) -> list[str]:
+    """What the threshold means for *this* record and *this* posting.
+
+    Printing "62.4 against a threshold of 80" reads as a failure. Very often it is not one:
+    the posting asked for things the record has never contained, ground.py made sure no
+    rewrite could invent them, and 64.1 was the highest number available before the first
+    word was written. That is worth saying in the same breath as the score, not three
+    sections later in the gap list.
+    """
+    if ceiling is None:
+        return []
+    if ceiling.is_reachable(threshold):
+        if score.total >= threshold:
+            return []
+        return [
+            f"The threshold of {threshold:.0f} was reachable for this record — this posting caps at "
+            f"{ceiling.total:.1f} and the draft got {score.total:.1f}. The shortfall is tailoring, "
+            "not the record: see the unsurfaced keywords below.",
+            "",
+        ]
+    lines = [
+        f"**The threshold of {threshold:.0f} was never reachable here.** The highest score this "
+        f"record can get against this posting is {ceiling.total:.1f}, because the posting asks for "
+        "things nothing in it supports and the grounding gate will not let them be invented. A low "
+        "ceiling is the answer to the question, not a failure to answer it.",
+        "",
+    ]
+    if ceiling.unreachable:
+        lines += [
+            "Out of reach for this record: " + ", ".join(ceiling.unreachable[:15]),
+            "",
+        ]
+    return lines
 
 
 def _citations(doc: ResumeDoc, index: SourceIndex) -> list[str]:
@@ -61,15 +97,26 @@ def build(
     threshold: float,
     blocked_terms: list[str],
     violations: list[Violation],
+    removed: list[str] | None = None,
+    ceiling: Ceiling | None = None,
+    stop_reason: str = "",
+    review: AtsReport | None = None,
 ) -> str:
+    headline = f"**{score.total:.1f} / 100** (threshold {threshold:.0f})"
+    if ceiling is not None:
+        headline = (
+            f"**{score.total:.1f}** of a reachable **{ceiling.total:.1f}** "
+            f"(threshold {threshold:.0f})"
+        )
     lines: list[str] = [
         f"# {jd.title or 'Untitled role'} — {jd.company or 'unknown company'}",
         "",
-        f"Generated {date.today().isoformat()} by resume-fill. Iterations: {iterations}.",
+        f"Generated {date.today().isoformat()} by resume-fill. Iterations: {iterations}"
+        + (f", stopped because {stop_reason}." if stop_reason else "."),
         "",
         "## Score",
         "",
-        f"**{score.total:.1f} / 100** (threshold {threshold:.0f})",
+        headline,
         "",
         "> This number is a **local proxy**. No employer computes it: Greenhouse and Lever do not",
         "> rank by keyword at all, and Taleo/iCIMS keyword search happens recruiter-side. Treat it",
@@ -77,7 +124,33 @@ def build(
         "",
         *_table(score),
         "",
+        *_ceiling_note(score, ceiling, threshold),
     ]
+
+    if review is not None:
+        lines += [
+            "## Machine-readability",
+            "",
+            review.summary() + ".",
+            "",
+            "| | Check | What it found |",
+            "|---|---|---|",
+        ]
+        for check in review.checks:
+            mark = "✓" if check.ok else ("✗" if check.blocking else "!")
+            lines.append(f"| {mark} | {check.name} | {check.detail} |")
+        lines.append("")
+        if review.failed:
+            lines += ["What to do about the failures:", ""]
+            lines += [f"- **{c.name}** — {c.fix}" for c in review.failed if c.fix]
+            lines.append("")
+        lines += [
+            "> `✗` affects whether a parser can read the document at all. `!` is advisory: it",
+            "> makes the résumé weaker to a human, and it never fails a build. Nothing here is a",
+            "> score an employer computes — see the header of `ats.py` for what is deliberately",
+            "> not checked, and why.",
+            "",
+        ]
 
     if verify_report is not None:
         lines += ["## Parse check", "", f"{verify_report.summary()}", ""]
@@ -123,6 +196,19 @@ def build(
             "",
         ]
 
+    if removed:
+        lines += [
+            "## Removed so the rest could be kept",
+            "",
+            "The draft claimed these and the record could not back them, so they were cut and the",
+            "remainder was put back through the same gate. This résumé is therefore shorter than",
+            "the one the model wrote — which is the trade, and it is stated here rather than",
+            "absorbed silently.",
+            "",
+            *[f"- {item}" for item in removed],
+            "",
+        ]
+
     if blocked_terms:
         lines += [
             "## Blocked by the grounding gate",
@@ -158,7 +244,7 @@ def cover_section(cover_run, jd: JobDescription, index: SourceIndex) -> str:
     standing on.
     """
     best = cover_run.best
-    letter = best.letter
+    letter = best.document
     lines = [
         "",
         f"# Cover letter — {jd.company or 'unknown company'}",
@@ -171,6 +257,13 @@ def cover_section(cover_run, jd: JobDescription, index: SourceIndex) -> str:
         lines += [best.verify_report.summary(), ""]
         if best.verify_report.missing:
             lines += [f"- {item}" for item in best.verify_report.missing] + [""]
+    if best.repair is not None and best.repair.dropped:
+        lines += [
+            "## Removed so the rest could be kept",
+            "",
+            *[f"- {v.where} — {v.detail}" for v in best.repair.dropped],
+            "",
+        ]
     if best.violations:
         lines += [
             "## Unresolved grounding violations",
