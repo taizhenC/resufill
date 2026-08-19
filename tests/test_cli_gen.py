@@ -208,3 +208,42 @@ def test_gen_without_a_profile_says_to_run_init(monkeypatch, tmp_path, capsys):
     )
     assert main(["gen", "--jd", str(jd_path)]) == 1
     assert "resume-fill init" in capsys.readouterr().out
+
+
+# --------------------------------------------------------------- preview ----
+
+
+def test_preview_answers_without_calling_the_model(wired, capsys, monkeypatch):
+    """The whole point: the question "is this one worth applying to" costs a minute and four
+    model calls through `gen`, and nothing at all here."""
+    def explode(*args, **kwargs):
+        raise AssertionError("preview must not call the model")
+
+    monkeypatch.setattr("resume_fill.llm.complete_json", explode)
+    assert main(["preview", "--jd", wired["jd"]]) == 0
+
+    printed = capsys.readouterr().out
+    assert "no model was called and nothing was spent" in printed
+    assert "your record covers" in printed and "Python" in printed
+    assert "nothing in your record supports" in printed and "Kubernetes" in printed
+    assert "the highest this record can score for this posting is 71.2" in printed
+
+
+def test_preview_says_when_the_threshold_is_out_of_reach(wired, capsys, monkeypatch):
+    from resume_fill.config import Settings
+
+    monkeypatch.setattr(
+        "resume_fill.config.settings",
+        Settings(PROFILE_PATH=wired["tmp_path"] / "profile.yaml",
+                 EVIDENCE_PATH=wired["tmp_path"] / "none.json", SCORE_THRESHOLD=90),
+    )
+    assert main(["preview", "--jd", wired["jd"]]) == 0
+    assert "no rewrite closes the difference" in capsys.readouterr().out
+
+
+def test_preview_without_a_profile_says_so(tmp_path, capsys, monkeypatch):
+    from resume_fill.config import Settings
+
+    monkeypatch.setattr("resume_fill.config.settings", Settings(PROFILE_PATH=tmp_path / "nope.yaml"))
+    assert main(["preview", "--jd", "-"]) == 1
+    assert "run `resume-fill init`" in capsys.readouterr().out

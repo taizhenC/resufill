@@ -33,13 +33,17 @@ resume-fill init --linkedin-export data/linkedin_export --resume-pdf old-resume.
 # 2. Optional: add an evidence layer from your blog. Feeds/sitemaps are autodetected.
 resume-fill blog sync
 
-# 3. Generate. --jd takes a file, an https URL, or - for stdin.
+# 3. Look before you spend anything. No model call, no cost: it prints what the posting
+#    asks for, what your record already covers, and the highest score it could reach.
+resume-fill preview --jd jd.txt
+
+# 4. Generate. --jd takes a file, an https URL, or - for stdin.
 resume-fill gen --jd jd.txt              # résumé + cover letter (default)
 resume-fill gen --jd jd.txt --resume     # résumé only
 resume-fill gen --jd jd.txt --cover      # cover letter only
 cat posting.txt | resume-fill gen --jd -
 
-# 4. Optional: proposed LinkedIn copy, as a diff. You paste it.
+# 5. Optional: proposed LinkedIn copy, as a diff. You paste it.
 resume-fill linkedin draft --export data/linkedin_export
 ```
 
