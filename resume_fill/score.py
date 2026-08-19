@@ -185,7 +185,11 @@ def _title_fit(jd: JobDescription, doc: ResumeDoc, profile: Profile) -> Componen
     held_titles = " ".join(
         e.title for e in profile.experience if e.id in {s.source_id for s in doc.experience}
     )
-    surface = normalize(" ".join([doc.headline, held_titles, profile.basics.headline]))
+    return _title_fit_from(jd, " ".join([doc.headline, held_titles, profile.basics.headline]))
+
+
+def _title_fit_from(jd: JobDescription, text: str) -> Component:
+    surface = normalize(text)
 
     if jd.title:
         wanted = _content_words(jd.title)
@@ -314,6 +318,94 @@ def score(
         stuffed=stuffed,
         unaddressed_qualifications=unaddressed,
     )
+
+
+# --------------------------------------------------------------- ceiling ----
+
+
+@dataclass
+class Ceiling:
+    """The highest this score can go for this record against this posting.
+
+    The number is a stopping rule (PLAN.md §2), and a stopping rule that cannot be reached
+    is not a rule, it is a way of spending four LLM calls to arrive at the same answer the
+    first one gave. A posting asking for Kubernetes against a record that has never touched
+    it caps the hard-skill component before a single word is written — no rewrite closes
+    that, because ground.py exists to make sure no rewrite can.
+
+    So the loop is told what is reachable and stops when it gets there, and the report says
+    "62.4 of a reachable 64.1" instead of "62.4 against a threshold of 80", which reads as a
+    failure and is not one.
+
+    This is computed from the record and the posting alone. It is deliberately optimistic:
+    it assumes every keyword the record contains anywhere could be surfaced on one page,
+    which a one-page budget will not always allow. An optimistic ceiling is the safe
+    direction — it never stops the loop early on the grounds that something was impossible
+    when it was merely hard.
+    """
+
+    total: float
+    components: dict[str, float] = field(default_factory=dict)
+    # Keywords the posting asked for that appear nowhere in the record. These are the whole
+    # reason the ceiling is below 100, and they are facts about the candidate.
+    unreachable: list[str] = field(default_factory=list)
+
+    def gap_to(self, threshold: float) -> float:
+        """How far the threshold is above what this record can reach. Zero when reachable."""
+        return max(0.0, threshold - self.total)
+
+    def is_reachable(self, threshold: float) -> bool:
+        return self.total >= threshold
+
+
+def record_text(profile: Profile, index: SourceIndex) -> str:
+    """Everything the résumé could possibly say, if the page were infinite.
+
+    The union of every source's text and every declared skill — which is exactly the set
+    ground.py will license claims from, so a keyword absent from this string is a keyword no
+    grounded document can contain.
+    """
+    parts = [source.text for source in index.values()]
+    parts.extend(" ".join(source.skills) for source in index.values())
+    parts.extend([profile.basics.headline, " ".join(profile.all_skills())])
+    return "\n".join(p for p in parts if p)
+
+
+def ceiling(profile: Profile, jd: JobDescription, index: SourceIndex) -> Ceiling:
+    """The score a perfect selection from this record would get against this posting."""
+    haystack = record_text(profile, index)
+    raws: dict[str, float] = {}
+
+    if jd.hard_skills:
+        matched, missing = _coverage(jd.hard_skills, haystack)
+        raws["hard_skills"] = len(matched) / len(jd.hard_skills)
+    else:
+        raws["hard_skills"] = 1.0
+        missing = []
+
+    if jd.qualifications:
+        answered = sum(1 for q in jd.qualifications if addresses(q, haystack))
+        raws["qualifications"] = answered / len(jd.qualifications)
+    else:
+        raws["qualifications"] = 1.0
+
+    titles = " ".join(e.title for e in profile.experience)
+    raws["title_fit"] = _title_fit_from(jd, f"{titles} {profile.basics.headline}").raw
+
+    if jd.keywords:
+        matched_kw, missing_kw = _coverage(jd.keywords, haystack)
+        raws["keywords_in_context"] = len(matched_kw) / len(jd.keywords)
+    else:
+        raws["keywords_in_context"] = 1.0
+        missing_kw = []
+
+    # Every format check is passable by construction — the renderer produces a single
+    # column, and the page budget is a choice rather than a fact about the record.
+    raws["format"] = 1.0
+
+    total = round(sum(WEIGHTS[name] * raw * 100 for name, raw in raws.items()), 1)
+    unreachable = [canonical(t) for t in dict.fromkeys([*missing, *missing_kw])]
+    return Ceiling(total=total, components=raws, unreachable=unreachable)
 
 
 # ---------------------------------------------------------- loop feedback ----
