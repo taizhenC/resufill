@@ -83,6 +83,10 @@ _USER = """Write a résumé for this posting, using only the catalogue below.
    posting says "code review" and a recorded highlight describes assessing other people's
    code against rubrics, write it as code review — same fact, the reader's words. This is
    rephrasing, which is allowed and wanted; adding a fact is not.
+9a. The headline is one line naming what this person does, in the posting's words for it.
+   Where the record's substance matches the posting's job title, use the posting's phrasing:
+   the reader is scanning for their own words and this costs nothing. Never claim a level
+   the record does not show — "Senior" is a fact about roles held, not a phrasing choice.
 {extra_rules}
 === OUTPUT ===
 Return JSON exactly in this shape:

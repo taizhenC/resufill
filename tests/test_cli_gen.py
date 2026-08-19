@@ -159,7 +159,7 @@ def test_an_unreachable_threshold_is_reported_as_unreachable_not_as_a_shortfall(
     assert code == 0
     printed = capsys.readouterr().out
     assert "was not reachable for this record" in printed
-    assert "caps at 71.2" in printed
+    assert "caps at 75.0" in printed
     assert "Kubernetes" in printed
 
 
@@ -177,7 +177,7 @@ def test_strict_does_not_fail_a_run_for_missing_an_impossible_number(wired, caps
 
 @needs_chromium
 def test_strict_turns_a_reachable_shortfall_into_a_failure(wired, capsys):
-    """71.2 was available and the draft got 46.2. That gap is tailoring, and STRICT_SCORE
+    """75.0 was available and the draft got 46.2. That gap is tailoring, and STRICT_SCORE
     exists for exactly this case."""
     wired["responses"].append(MIDDLING)
     code = main(["gen", "--jd", wired["jd"], "--out", str(wired["tmp_path"] / "run"),
@@ -226,7 +226,7 @@ def test_preview_answers_without_calling_the_model(wired, capsys, monkeypatch):
     assert "no model was called and nothing was spent" in printed
     assert "your record covers" in printed and "Python" in printed
     assert "nothing in your record supports" in printed and "Kubernetes" in printed
-    assert "the highest this record can score for this posting is 71.2" in printed
+    assert "the highest this record can score for this posting is 75.0" in printed
 
 
 def test_preview_says_when_the_threshold_is_out_of_reach(wired, capsys, monkeypatch):
