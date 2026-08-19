@@ -101,10 +101,20 @@ low ceiling is therefore information: the role genuinely wants things you have n
 - **in your record but not on this résumé** — a tailoring miss, fixable by editing the record;
 - **not in your record at all** — a fact about you, which no rewrite closes.
 
-A score below the threshold is a warning, not a failure (`--strict` changes that). A PDF that fails
-its **parse** check is always a failure — every build extracts the text back out of the file it
-just produced and asserts the contact block, every section heading and every bullet survived the
-round trip. That is the guarantee that actually matters.
+That second list is also computed *before the first model call*, which is what the loop stops on.
+The **ceiling** is the highest score your record can reach against this posting: a role asking for
+three technologies you have never touched caps the number before a word is written, and the gate
+guarantees no rewrite can lift it. So the run stops when it reaches the threshold, reaches the
+ceiling, or stops improving — rather than spending four model calls rediscovering what the first
+one already found. `report.md` says which of those happened, and reports "62.4 of a reachable 64.1"
+instead of "62.4 against a threshold of 80", because the second reads as a failure and is not one.
+
+A score below the threshold is a warning, not a failure (`--strict` changes that — but only when
+the threshold was actually *reachable*; failing a run for missing an impossible number would be
+scoring you on experience nobody claimed you had). A PDF that fails its **parse** check is always a
+failure — every build extracts the text back out of the file it just produced and asserts the
+contact block, every section heading and every bullet survived the round trip. That is the
+guarantee that actually matters.
 
 ## LinkedIn
 
@@ -116,7 +126,7 @@ client, no session and no credentials, and a test asserts that against its sourc
 ## Development
 
 ```bash
-uv run pytest        # 207 tests
+uv run pytest        # 316 tests
 uv run ruff check .
 ```
 
