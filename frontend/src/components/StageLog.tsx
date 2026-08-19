@@ -1,16 +1,22 @@
-import { cancelling, cancelRun, documentLabel, events, job, running, stageLabel } from "../run";
-import type { StageEvent } from "../types";
+import { cancelling, cancelRun, documentLabel, events, job, running, stageLabel, timeline } from "../run";
+import { Timeline } from "./Timeline";
 
 /**
  * The live log.
  *
  * It exists because a run is 10 to 60 seconds of silence per stage. On a terminal that is
- * fine; in a browser it looks like the thing has crashed. Every line here is a moment the
+ * fine; in a browser it looks like the thing has crashed. Every row here is a moment the
  * pipeline was genuinely between two blocking calls.
  */
 export function StageLog() {
   const snapshot = job.value;
   if (!snapshot) return null;
+
+  const items = timeline(events.value);
+  const latest = events.value[events.value.length - 1];
+  const where = latest?.attempt
+    ? `${documentLabel(latest.document ?? "resume")} attempt ${latest.attempt}`
+    : "";
 
   return (
     <section class="card">
@@ -26,6 +32,12 @@ export function StageLog() {
         )}
       </header>
 
+      {/* One short sentence rather than aria-live on the list: a live region wrapping every row
+          gets re-read whole on each poll, which turns a four-iteration run into a monologue. */}
+      <p class="sr-only" aria-live="polite">
+        {latest ? `${stageLabel(latest.stage)}${where ? `, ${where}` : ""}` : "starting"}
+      </p>
+
       {snapshot.cancel_requested && running.value && (
         <p class="field-hint">
           Stopping at the next stage boundary. Cancelling mid-render would leave a half-written
@@ -33,36 +45,9 @@ export function StageLog() {
         </p>
       )}
 
-      <ol class="stages">
-        {events.value.map((event, index) => (
-          <StageRow key={index} event={event} last={index === events.value.length - 1} />
-        ))}
-      </ol>
+      <Timeline items={items} live={running.value} />
 
       {snapshot.error && <p class="error">{snapshot.error}</p>}
     </section>
-  );
-}
-
-function StageRow({ event, last }: { event: StageEvent; last: boolean }) {
-  const spinning = last && running.value;
-  const where =
-    event.attempt !== undefined
-      ? `${documentLabel(event.document ?? "resume")} ${event.attempt}/${event.attempts}`
-      : "";
-
-  return (
-    <li class={`stage ${event.stage === "rejected" ? "stage-bad" : ""} ${spinning ? "stage-live" : ""}`}>
-      <span class="stage-dot" aria-hidden="true" />
-      <span class="stage-name">{stageLabel(event.stage)}</span>
-      {where && <span class="stage-where">{where}</span>}
-      <span class="stage-detail">
-        {event.score !== undefined && `score ${event.score}`}
-        {event.pages !== undefined && ` · ${event.pages} page${event.pages === 1 ? "" : "s"}`}
-        {event.parses !== undefined && ` · ${event.parses ? "parses" : "failed its checks"}`}
-        {event.words !== undefined && ` · ${event.words} words`}
-        {event.reason && event.reason}
-      </span>
-    </li>
   );
 }

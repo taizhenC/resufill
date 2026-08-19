@@ -1,4 +1,5 @@
 import type { ScoreRecord } from "../types";
+import { Meter } from "./Meter";
 
 const STOP_REASON: Record<string, string> = {
   threshold: "the score reached the threshold",
@@ -17,9 +18,8 @@ const STOP_REASON: Record<string, string> = {
  * and printing it alone would invite exactly the misreading the caveat exists to prevent.
  */
 export function ScorePanel({ score }: { score: ScoreRecord }) {
-  // `?? null` rather than a bare read: a run.json written before the ceiling existed has no
-  // such key, and `undefined` slipped past every `=== null` guard below straight into
-  // `.toFixed`, which blanked the whole run view for every historical run.
+  // A run recorded before the ceiling existed has no ceiling to show, which is the same
+  // situation as one that could not compute it: say nothing about it rather than guess.
   const ceiling = score.ceiling ?? null;
   const unreachable = score.unreachable ?? [];
   // "Below the threshold" is the wrong headline when the threshold was never available to
@@ -29,20 +29,28 @@ export function ScorePanel({ score }: { score: ScoreRecord }) {
   const verdict = score.met
     ? { tone: "pill-ok", text: "met the threshold" }
     : !reachable
-      ? { tone: "pill-ok", text: `all this record could reach — ${ceiling!.toFixed(1)} max here` }
-      : (score.at_ceiling ?? false)
+      ? { tone: "pill-note", text: `all this record could reach — ${ceiling!.toFixed(1)} max here` }
+      : score.at_ceiling
         ? { tone: "pill-warn", text: "at this record's ceiling" }
         : { tone: "pill-warn", text: `below the threshold of ${score.threshold}` };
+  // Same three cases and the same colours as the free preview: a run should confirm what the
+  // preview said, not appear to be answering a different question.
+  const cased = score.met ? "clear" : !reachable ? "capped" : "tight";
 
   return (
     <section class="card">
-      <header class="score-head">
-        <div>
-          <span class="score-total">{score.total.toFixed(1)}</span>
-          <span class="score-outof">/ {ceiling === null ? 100 : ceiling.toFixed(1)} reachable</span>
-        </div>
-        <span class={`pill ${verdict.tone}`}>{verdict.text}</span>
-      </header>
+      <div class={`ceiling ceiling-${cased}`}>
+        <header class="ceiling-head">
+          <div>
+            <span class="ceiling-total">{score.total.toFixed(1)}</span>
+            <span class="ceiling-outof">
+              / {ceiling === null ? 100 : ceiling.toFixed(1)} reachable
+            </span>
+          </div>
+          <span class={`pill ${verdict.tone}`}>{verdict.text}</span>
+        </header>
+        <Meter what="score" value={score.total} threshold={score.threshold} ceiling={ceiling} />
+      </div>
 
       <p class="caveat">
         A <strong>local proxy</strong>, not a metric any employer computes. Because the grounding
@@ -70,33 +78,35 @@ export function ScorePanel({ score }: { score: ScoreRecord }) {
         </p>
       )}
 
-      <table class="components">
-        <thead>
-          <tr>
-            <th>Component</th>
-            <th class="num">Weight</th>
-            <th class="num">Score</th>
-            <th class="num">Points</th>
-          </tr>
-        </thead>
-        <tbody>
-          {score.components.map((component) => (
-            <tr key={component.name}>
-              <td>
-                {component.label}
-                <small>{component.detail}</small>
-              </td>
-              <td class="num">{component.weight.toFixed(2)}</td>
-              <td class="num">
-                <span class="bar" style={{ "--fill": `${Math.round(component.raw * 100)}%` }}>
-                  {Math.round(component.raw * 100)}%
-                </span>
-              </td>
-              <td class="num">{component.points.toFixed(1)}</td>
+      <div class="table-scroll">
+        <table class="components">
+          <thead>
+            <tr>
+              <th>Component</th>
+              <th class="num">Weight</th>
+              <th class="num">Score</th>
+              <th class="num">Points</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {score.components.map((component) => (
+              <tr key={component.name}>
+                <td>
+                  {component.label}
+                  <small>{component.detail}</small>
+                </td>
+                <td class="num">{component.weight.toFixed(2)}</td>
+                <td class="num">
+                  <span class="bar" style={{ "--fill": `${Math.round(component.raw * 100)}%` }}>
+                    {Math.round(component.raw * 100)}%
+                  </span>
+                </td>
+                <td class="num">{component.points.toFixed(1)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </section>
   );
 }
@@ -128,9 +138,11 @@ export function GapPanel({ score }: { score: ScoreRecord }) {
             corpus supports them. They were deliberately left out. This is what the role would need
             you to go and do.
           </p>
+          {/* Same vocabulary as the preview's unreachable list, because it is the same fact
+              arriving later: absent from the record, so dashed and unfilled rather than red. */}
           <ul class="chips">
             {absent.map((gap) => (
-              <li class="chip chip-bad" key={gap.keyword}>
+              <li class="chip chip-gap" key={gap.keyword}>
                 {gap.keyword}
               </li>
             ))}

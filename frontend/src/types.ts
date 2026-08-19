@@ -225,8 +225,13 @@ export interface LegacyRunRecord extends RunSummary {
 
 export type LoadedRun = RunRecord | LegacyRunRecord;
 
+/**
+ * A run directory with no run.json. Its files are still there; nothing structured is.
+ *
+ * The flag is what the server sets deliberately, so it leads. The structural check behind it
+ * is not redundancy for its own sake: this shape is the *absence* of the fields everything
+ * downstream reads, and getting it wrong takes the whole view down rather than one panel.
+ */
 export function isLegacy(run: LoadedRun): run is LegacyRunRecord {
-  // The discriminator is the absence of the structured half, not the `legacy` flag: a real
-  // record also carries `legacy` in one of its two shapes, and only one of them has a `jd`.
-  return (run as RunRecord).jd === undefined;
+  return run.legacy === true || (run as RunRecord).jd === undefined;
 }
