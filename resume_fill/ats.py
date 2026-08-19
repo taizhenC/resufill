@@ -27,6 +27,10 @@ Which splits the list in two, and the split is the point:
               are fed back into the rewrite loop, which is the one place they can actually
               be acted on.
 
+The evidence behind every check, and the reasoning for each thing left out, is in
+docs/research/ats-and-cover-letters.md — including a check-by-check cross-reference of this
+module against what its sources actually say.
+
 Deliberately absent, because there is no evidence for them and the tool would be lying by
 implication if it checked them: keyword density targets, "ATS match score" percentages,
 white-text keyword injection (which is fraud, and detected), résumé length rules stated as
