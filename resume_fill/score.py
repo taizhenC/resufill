@@ -91,6 +91,10 @@ class Score:
     # Kept verbatim rather than only counted: "3 of 11 addressed" tells you nothing about
     # which three, and the wording of the other eight is the useful part.
     unaddressed_qualifications: list[str] = field(default_factory=list)
+    # Words from the posting's own job title that the résumé never uses for the role. These
+    # are the cheapest points on the page: the headline is phrasing, not a claim, so using
+    # the reader's words for the thing you already do costs nothing and is not fabrication.
+    title_words_missing: list[str] = field(default_factory=list)
 
     @property
     def total(self) -> float:
@@ -181,16 +185,30 @@ _SENIORITY_WORDS = {
 }
 
 
-def _title_fit(jd: JobDescription, doc: ResumeDoc, profile: Profile) -> Component:
+def _title_fit(
+    jd: JobDescription, doc: ResumeDoc, profile: Profile
+) -> tuple[Component, list[str]]:
     """Two halves: does the résumé speak the posting's vocabulary for the role, and does
     the level it demonstrates match the level it asks for?"""
     held_titles = " ".join(
         e.title for e in profile.experience if e.id in {s.source_id for s in doc.experience}
     )
-    return _title_fit_from(jd, " ".join([doc.headline, held_titles, profile.basics.headline]))
+    surface = " ".join([doc.headline, held_titles, profile.basics.headline])
+    component = _title_fit_from(jd, surface)
+    missing = sorted(_content_words(jd.title) - _content_words(surface)) if jd.title else []
+    return component, missing
 
 
-def _title_fit_from(jd: JobDescription, text: str) -> Component:
+def _title_fit_from(jd: JobDescription, text: str, *, level_text: str | None = None) -> Component:
+    """The two halves measure different kinds of thing, which is why they can be given
+    different surfaces.
+
+    Vocabulary is about *phrasing*: the headline is written by the tailor, and a grounded
+    headline may name anything the record supports. Level is about *fact*: what a candidate
+    demonstrably held. The ceiling passes the whole record for the first and only the held
+    titles for the second — see `ceiling`. The scorer passes one surface for both, because
+    it is looking at a document that already exists.
+    """
     surface = normalize(text)
 
     if jd.title:
@@ -203,8 +221,9 @@ def _title_fit_from(jd: JobDescription, text: str) -> Component:
         detail = f"title vocabulary {overlap:.0%} matched; posting states no level"
         return Component("title_fit", "Title / seniority alignment", WEIGHTS["title_fit"], overlap, detail)
 
+    levels = normalize(level_text) if level_text is not None else surface
     pattern = _SENIORITY_WORDS.get(jd.seniority, jd.seniority)
-    level = 1.0 if re.search(pattern, surface, re.I) else 0.0
+    level = 1.0 if re.search(pattern, levels, re.I) else 0.0
     detail = (
         f"title vocabulary {overlap:.0%} matched; "
         f"{'the record shows' if level else 'nothing in the record shows'} a {jd.seniority}-level role"
@@ -321,12 +340,14 @@ def score(
     _, missing_keywords = _coverage(jd.keywords, haystack)
     all_missing = list(dict.fromkeys(missing + missing_keywords))
 
+    title, missing_title_words = _title_fit(jd, doc, profile)
     return Score(
-        components=[hard, quals, _title_fit(jd, doc, profile), keywords, _format(review, report)],
+        components=[hard, quals, title, keywords, _format(review, report)],
         matched=matched,
         gaps=classify_gaps(all_missing, index),
         stuffed=stuffed,
         unaddressed_qualifications=unaddressed,
+        title_words_missing=missing_title_words,
     )
 
 
@@ -359,6 +380,15 @@ class Ceiling:
     # Keywords the posting asked for that appear nowhere in the record. These are the whole
     # reason the ceiling is below 100, and they are facts about the candidate.
     unreachable: list[str] = field(default_factory=list)
+
+    def covers(self, total: float) -> bool:
+        """Is `total` at or under this ceiling?
+
+        Kept as a method with a name rather than an inline comparison, because the *only*
+        interesting answer is False: that would mean a real draft scored above what was
+        computed as its maximum, and the ceiling would be measuring the wrong thing.
+        """
+        return total <= self.total + 1e-9
 
     def gap_to(self, threshold: float) -> float:
         """How far the threshold is above what this record can reach. Zero when reachable."""
@@ -399,8 +429,17 @@ def ceiling(profile: Profile, jd: JobDescription, index: SourceIndex) -> Ceiling
     else:
         raws["qualifications"] = 1.0
 
-    titles = " ".join(e.title for e in profile.experience)
-    raws["title_fit"] = _title_fit_from(jd, f"{titles} {profile.basics.headline}").raw
+    # The two halves have different ceilings, and conflating them made this number one a
+    # real draft could score *above* — which reads as a bug in the report and undermines the
+    # only thing the number is for.
+    #
+    # Vocabulary is always fully reachable. The headline is written by the tailor, and the
+    # grounding gate polices technical terms and figures rather than ordinary words, so
+    # phrasing a headline in the posting's own words is free and legitimate — it is the
+    # tailoring this tool exists to do. Level is not reachable at all if the record does not
+    # show it: seniority is a fact about roles held, and no phrasing manufactures one.
+    titles = " ".join([*(e.title for e in profile.experience), profile.basics.headline])
+    raws["title_fit"] = _title_fit_from(jd, jd.title, level_text=titles).raw
 
     if jd.keywords:
         matched_kw, missing_kw = _coverage(jd.keywords, haystack)
@@ -438,6 +477,17 @@ def feedback(result: Score, threshold: float, report: VerifyReport | None = None
         lines.append("These are in the record but did not make it into the résumé. Surface them by")
         lines.append("selecting or rewriting the bullets that already contain them:")
         lines.extend(f"  - {g.keyword} (in: {g.where})" for g in unsurfaced[:15])
+    if result.title_words_missing:
+        lines.append("")
+        lines.append(
+            "The headline does not use the posting's own words for the role. Rewrite it so it "
+            "does, as far as the record's substance allows: "
+            + ", ".join(result.title_words_missing[:8])
+        )
+        lines.append(
+            "This is phrasing, not a claim — the gate polices technologies and figures, not "
+            "which ordinary words describe the same job."
+        )
     if result.unaddressed_qualifications:
         lines.append("")
         lines.append("Qualifications the draft does not answer:")

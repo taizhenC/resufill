@@ -83,6 +83,7 @@ class ScoreRecord(BaseModel):
     gaps_unsurfaced: list[GapRecord] = Field(default_factory=list)
     stuffed: list[str] = Field(default_factory=list)
     unaddressed_qualifications: list[str] = Field(default_factory=list)
+    title_words_missing: list[str] = Field(default_factory=list)
 
 
 class VerifyRecord(BaseModel):
@@ -223,6 +224,7 @@ def score_record(
         ],
         stuffed=list(score.stuffed),
         unaddressed_qualifications=list(score.unaddressed_qualifications),
+        title_words_missing=list(score.title_words_missing),
     )
 
 
