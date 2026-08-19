@@ -101,6 +101,7 @@ def build(
     ceiling: Ceiling | None = None,
     stop_reason: str = "",
     review: AtsReport | None = None,
+    cost: str = "",
 ) -> str:
     headline = f"**{score.total:.1f} / 100** (threshold {threshold:.0f})"
     if ceiling is not None:
@@ -112,7 +113,8 @@ def build(
         f"# {jd.title or 'Untitled role'} — {jd.company or 'unknown company'}",
         "",
         f"Generated {date.today().isoformat()} by resume-fill. Iterations: {iterations}"
-        + (f", stopped because {stop_reason}." if stop_reason else "."),
+        + (f", stopped because {stop_reason}" if stop_reason else "")
+        + (f". Cost: {cost}." if cost else "."),
         "",
         "## Score",
         "",

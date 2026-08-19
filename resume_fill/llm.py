@@ -13,6 +13,7 @@ from typing import Any
 
 from .config import Settings
 from .config import settings as default_settings
+from .meter import Meter, timed
 
 # A callable with complete_json's shape. Every stage that needs a model takes one of these.
 LLMCall = Callable[..., dict[str, Any]]
@@ -69,11 +70,16 @@ def complete_json(
     max_tokens: int | None = None,
     temperature: float | None = None,
     retries: int = 2,
+    meter: Meter | None = None,
 ) -> dict[str, Any]:
     """Single round-trip to the model, JSON in / JSON out.
 
     Retries only transport and JSON-shape failures. A model that answers coherently but
     ungroundedly is not this function's problem — ground.py catches that.
+
+    Each attempt is metered separately, including the ones that fail: a round trip that
+    came back as unparseable JSON cost the same wall clock and the same tokens as one that
+    did not, and a count that hid the retries would understate every run that had any.
     """
     cfg = cfg or default_settings
     if not cfg.llm_configured:
@@ -82,17 +88,24 @@ def complete_json(
     last: Exception | None = None
     for attempt in range(retries + 1):
         try:
-            resp = client.chat.completions.create(
-                model=cfg.LLM_MODEL,
-                messages=[
-                    {"role": "system", "content": system},
-                    {"role": "user", "content": user},
-                ],
-                response_format={"type": "json_object"},
-                max_tokens=max_tokens or cfg.LLM_MAX_TOKENS,
-                temperature=cfg.LLM_TEMPERATURE if temperature is None else temperature,
-            )
-            return extract_json(resp.choices[0].message.content or "")
+            with timed(meter) as call:
+                resp = client.chat.completions.create(
+                    model=cfg.LLM_MODEL,
+                    messages=[
+                        {"role": "system", "content": system},
+                        {"role": "user", "content": user},
+                    ],
+                    response_format={"type": "json_object"},
+                    max_tokens=max_tokens or cfg.LLM_MAX_TOKENS,
+                    temperature=cfg.LLM_TEMPERATURE if temperature is None else temperature,
+                )
+                usage = getattr(resp, "usage", None)
+                # Not every OpenAI-compatible endpoint returns usage, and the ones that do
+                # sometimes omit a field. A missing count is zero, never a crash: metering is
+                # bookkeeping and must not be able to fail a run.
+                call.prompt = int(getattr(usage, "prompt_tokens", 0) or 0)
+                call.completion = int(getattr(usage, "completion_tokens", 0) or 0)
+                return extract_json(resp.choices[0].message.content or "")
         except LLMError as exc:
             last = exc
         except Exception as exc:  # transport, rate limit, provider 5xx
