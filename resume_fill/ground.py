@@ -18,6 +18,13 @@ Four rules, in order of how often they catch something real:
      keep that block to things you would defend in an interview. Per-highlight skill
      tags do *not* get that licence: they are part of their own highlight's evidence,
      so citing job A cannot claim a tool tagged only on job B.
+
+     "Appears" is a question about the concept, not the letters: "Postgres" and
+     "PostgreSQL" are one tool, "CI/CD" and "continuous integration" are one practice, and
+     a note that says "Dockerised" has named Docker. See supported_term. Rejecting those
+     costs an iteration and teaches the model nothing except which synonym this gate
+     happens to know — while the tailor prompt is simultaneously telling it to write in the
+     posting's vocabulary.
   4. Every bullet is evidenced by the entry it is printed under. Rules 1-3 ask whether a
      claim is true of the candidate; this one asks whether it is true of *this job*, which
      is a different question and the one an interviewer asks.
@@ -29,7 +36,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 
 from .document import CoverLetter, LinkedInDraft, ResumeDoc
-from .lexicon import technical_tokens
+from .lexicon import base_forms, derived_forms, equivalents, technical_tokens
 from .profile import Profile
 from .source import SourceIndex, resolve, supporting_text
 from .textutil import contains_term, normalize, numbers, supports_number, term_in, truncate
@@ -73,7 +80,7 @@ def _claims_against(
                 )
             )
     for term in technical_tokens(text):
-        if term_in(term, declared) or term_in(term, allowed) or contains_term(supporting, term):
+        if supported_term(term, supporting, declared, allowed):
             continue
         found.append(
             Violation(
@@ -82,6 +89,29 @@ def _claims_against(
             )
         )
     return found
+
+
+def supported_term(
+    term: str, supporting: str, declared: set[str], allowed: set[str] = frozenset()
+) -> bool:
+    """Is this technology backed by something written down — under any of its names?
+
+    The literal spelling is checked first, then the other spellings of the same concept, then
+    the name a derived word was built from. All three are the *same claim*; only the letters
+    differ, and a gate that rejects on letters spends an iteration teaching the model to say
+    "continuous integration" where the posting said "CI/CD".
+
+    What this does not do is widen what may be claimed. Every accepted spelling still has to
+    resolve to a concept the cited source or the declared-skills block actually names — see
+    lexicon.EXPANSIONS for the rule on adding a pair.
+    """
+    for name in (term, *equivalents(term), *base_forms(term)):
+        if term_in(name, declared) or term_in(name, allowed) or contains_term(supporting, name):
+            return True
+    # Last, and only against the cited source: a note reading "Dockerised the worker" is
+    # evidence for Docker. Not checked against `declared`, which is a curated list of names
+    # and would never hold a conjugated one.
+    return any(contains_term(supporting, form) for form in derived_forms(term))
 
 
 def check(doc: ResumeDoc, profile: Profile, index: SourceIndex) -> list[Violation]:
@@ -193,7 +223,9 @@ def _check_skills(doc: ResumeDoc, profile: Profile) -> list[Violation]:
     found = []
     for category, skills in doc.skills.items():
         for skill in skills:
-            if not term_in(skill, declared):
+            # Same equivalence the bullets get: a record that says "Postgres" declares the
+            # skill a block writing "PostgreSQL" is claiming.
+            if not supported_term(skill, "", declared):
                 found.append(
                     Violation(
                         "undeclared_skill", f"skills[{category}]",

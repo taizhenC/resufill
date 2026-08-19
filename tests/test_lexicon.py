@@ -1,4 +1,11 @@
-from resume_fill.lexicon import canonical, find_terms, technical_tokens
+from resume_fill.lexicon import (
+    base_forms,
+    canonical,
+    derived_forms,
+    equivalents,
+    find_terms,
+    technical_tokens,
+)
 
 
 def test_canonical_folds_the_variants_a_posting_and_a_resume_spell_differently():
@@ -50,3 +57,58 @@ def test_technical_tokens_leaves_prose_alone():
 
 def test_technical_tokens_includes_curated_terms():
     assert "Kafka" in technical_tokens("Streamed events through Kafka")
+
+
+def test_equivalents_reads_both_directions():
+    """The tailor is told to write in the posting's vocabulary. If the posting says CI/CD
+    and the highlight says "continuous integration", both spellings have to license each
+    other or rule 9 of the tailor prompt fights the gate."""
+    assert "continuous integration" in equivalents("CI/CD")
+    assert "CI/CD" in equivalents("continuous integration")
+
+
+def test_equivalents_reaches_through_an_alias():
+    """"Postgres" and "PostgreSQL" are one concept, and the group is keyed on the
+    canonical name, so asking with either spelling finds the other."""
+    assert "PostgreSQL" in equivalents("postgres")
+    assert "postgres" in equivalents("PostgreSQL")
+
+
+def test_equivalents_is_empty_for_an_ordinary_word():
+    assert equivalents("throughput") == ()
+    assert equivalents("") == ()
+
+
+def test_cv_is_deliberately_not_expanded():
+    """A résumé is also a CV. A gate that cannot tell "computer vision" from the document
+    it is checking is not a gate — the empty entry in EXPANSIONS records that on purpose."""
+    assert "computer vision" not in equivalents("CV")
+
+
+def test_base_forms_strips_one_derivation_not_two():
+    """"Dockerized" is a claim about Docker. "Dockeriz" is not a word anybody wrote down,
+    which is what stripping "ed" as well would produce."""
+    assert base_forms("Dockerized") == ("Docker",)
+    assert base_forms("Terraforming") == ("Terraform",)
+
+
+def test_base_forms_leaves_a_name_that_merely_ends_in_a_suffix_alone():
+    assert base_forms("Kubernetes") == ()
+    assert base_forms("Redis") == ()
+
+
+def test_derived_forms_grows_a_tool_name_into_a_verb():
+    assert "Dockerized" in derived_forms("Docker")
+    assert "Dockerised" in derived_forms("Docker")
+
+
+def test_derived_forms_refuses_the_endings_that_would_swallow_ordinary_words():
+    """"sparked interest" must never license Spark, so -ed and -ing are not on the list."""
+    grown = derived_forms("Spark")
+    assert "Sparked" not in grown
+    assert "Sparking" not in grown
+
+
+def test_derived_forms_skips_names_too_short_to_grow_safely():
+    assert derived_forms("Go") == ()
+    assert derived_forms("machine learning") == ()

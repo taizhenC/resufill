@@ -195,3 +195,81 @@ def test_summarize_counts_by_kind(example_profile):
     assert summarize(check(doc, example_profile, example_profile.sources())) == (
         "unsupported_number×2, unsupported_term×1"
     )
+
+
+def test_a_declared_skill_spelled_the_other_way_is_still_declared(example_profile):
+    """profile.yaml declares PostgreSQL. A bullet that writes "Postgres" is making the same
+    claim, and rejecting it costs a whole iteration to relitigate spelling."""
+    doc = _doc(
+        experience=_experience(
+            "exp-northwind-backend",
+            ("Moved the ingestion path onto Postgres.", ["exp-northwind-backend.h1"]),
+        )
+    )
+    assert check(doc, example_profile, example_profile.sources()) == []
+
+
+def test_the_posting_s_acronym_is_licensed_by_the_source_s_phrase(example_profile):
+    """The tailor is told to write in the posting's vocabulary. If the highlight describes
+    continuous integration and the posting says CI/CD, both spellings are the same fact."""
+    profile = example_profile.model_copy(deep=True)
+    profile.experience[0].highlights[1].text = (
+        "Wired the contract tests into continuous integration so every push runs them."
+    )
+    doc = _doc(
+        experience=_experience(
+            "exp-northwind-backend",
+            ("Put the contract tests behind CI/CD.", ["exp-northwind-backend.h2"]),
+        )
+    )
+    assert check(doc, profile, profile.sources()) == []
+
+
+def test_a_source_that_conjugated_the_tool_name_still_evidences_it(example_profile):
+    profile = example_profile.model_copy(deep=True)
+    profile.experience[0].highlights[0].text = "Dockerised the ingestion worker so it runs anywhere."
+    doc = _doc(
+        experience=_experience(
+            "exp-northwind-backend",
+            ("Packaged the ingestion worker with Docker.", ["exp-northwind-backend.h1"]),
+        )
+    )
+    assert check(doc, profile, profile.sources()) == []
+
+
+def test_equivalence_does_not_license_a_tool_nobody_named(example_profile):
+    """The whole relaxation is about spelling. A concept the record has never touched is
+    still a gap, and still blocked."""
+    doc = _doc(
+        experience=_experience(
+            "exp-northwind-backend",
+            ("Ran the ingestion pool on Kubernetes.", ["exp-northwind-backend.h1"]),
+        )
+    )
+    violations = check(doc, example_profile, example_profile.sources())
+    assert [v.kind for v in violations] == ["unsupported_term"]
+
+
+def test_an_ordinary_verb_never_grows_into_a_tool(example_profile):
+    """"sparked" must not license Spark: that is the failure mode a looser gate invites,
+    and it is why the derivation list excludes -ed and -ing."""
+    profile = example_profile.model_copy(deep=True)
+    profile.experience[0].highlights[0].text = "Sparked a redesign of the ingestion path."
+    doc = _doc(
+        experience=_experience(
+            "exp-northwind-backend",
+            ("Processed the feeds with Spark.", ["exp-northwind-backend.h1"]),
+        )
+    )
+    assert [v.kind for v in check(doc, profile, profile.sources())] == ["unsupported_term"]
+
+
+def test_the_skills_block_may_spell_a_declared_skill_its_other_way(example_profile):
+    doc = _doc(
+        experience=_experience(
+            "exp-northwind-backend",
+            ("Rewrote the nightly ingestion job as an asyncio worker pool.", ["exp-northwind-backend.h1"]),
+        ),
+        skills={"Data": ["Postgres"]},
+    )
+    assert check(doc, example_profile, example_profile.sources()) == []

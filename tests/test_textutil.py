@@ -97,3 +97,20 @@ def test_truncate_prefers_a_word_boundary():
 )
 def test_a_plural_in_the_record_supports_the_singular_in_a_bullet(haystack, term, expected):
     assert contains_term(haystack, term) is expected
+
+
+def test_a_figure_written_out_in_words_still_supports_the_digits():
+    """A highlight saying "from three hours to twenty minutes" licenses a bullet saying 3.
+    The fact is written down; only the digits are not, and rejecting that is a grammar
+    argument rather than a grounding one."""
+    source = "cut the nightly run from three hours to twenty minutes"
+    assert supports_number(source, "3")
+    assert supports_number(source, "20")
+
+
+def test_a_word_number_does_not_support_a_different_figure():
+    assert not supports_number("cut the run from three hours", "4")
+
+
+def test_a_number_word_inside_another_word_is_not_a_quantity():
+    assert not supports_number("threes company was on the office television", "3")

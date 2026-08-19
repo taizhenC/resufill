@@ -85,11 +85,125 @@ _BY_NORM: dict[str, str] = {t.casefold(): t for t in TERMS}
 # Aliases that a job posting and a résumé spell differently. Normalising these is what
 # stops "Postgres" in your bullet from reading as a gap against "PostgreSQL" in the JD.
 ALIASES: dict[str, str] = {
-    "golang": "Go", "postgres": "PostgreSQL", "k8s": "Kubernetes", "js": "JavaScript",
-    "ts": "TypeScript", "node": "Node.js", "nodejs": "Node.js", "vuejs": "Vue",
+    "golang": "Go", "postgres": "PostgreSQL", "k8s": "Kubernetes", "k8": "Kubernetes",
+    "js": "JavaScript", "ts": "TypeScript", "node": "Node.js", "nodejs": "Node.js",
+    "vuejs": "Vue", "reactjs": "React", "react.js": "React", "nextjs": "Next.js",
     "sklearn": "scikit-learn", "amazon web services": "AWS", "google cloud": "GCP",
-    "ruby on rails": "Rails", "llms": "LLM", "shell": "Bash",
+    "google cloud platform": "GCP", "ruby on rails": "Rails", "llms": "LLM",
+    "shell": "Bash", "torch": "PyTorch", "csharp": "C#", "cpp": "C++",
+    "restful": "REST", "rest api": "REST", "rest apis": "REST", "postgressql": "PostgreSQL",
+    "github actions": "GitHub Actions", "gh actions": "GitHub Actions",
+    "huggingface": "Hugging Face", "objective c": "Objective-C", "dotnet": ".NET",
 }
+
+# Acronyms and the phrases they stand for.
+#
+# The tailor is *told* to write in the posting's vocabulary — that is rule 9 of its prompt,
+# and it is the whole point of tailoring. Then the gate would reject it for doing so: a
+# highlight recording "wired the test suite into the deploy pipeline on every push" cannot
+# license the word "CI/CD", even though they are the same fact and the posting asked for the
+# acronym. Every pair below is one that cost a whole iteration to relearn.
+#
+# The rule for adding one: the two spellings must be interchangeable *in both directions*
+# with no loss. "ML" for "machine learning", yes. "CV" for "computer vision", no — a résumé
+# is also a CV, and a gate that cannot tell them apart is not a gate.
+EXPANSIONS: dict[str, tuple[str, ...]] = {
+    "CI/CD": ("continuous integration", "continuous delivery", "continuous deployment"),
+    "machine learning": ("ML",),
+    "NLP": ("natural language processing",),
+    "API": ("application programming interface",),
+    "REST": ("representational state transfer", "RESTful"),
+    "LLM": ("large language model", "large language models"),
+    "SQL": ("structured query language",),
+    "ETL": ("extract transform load",),
+    "RAG": ("retrieval augmented generation", "retrieval-augmented generation"),
+    "ORM": ("object relational mapping", "object-relational mapping"),
+    "TDD": ("test driven development", "test-driven development"),
+    "OOP": ("object oriented programming", "object-oriented programming"),
+    "SRE": ("site reliability engineering",),
+    "CDN": ("content delivery network",),
+    "gRPC": ("google remote procedure call",),
+    "IaC": ("infrastructure as code",),
+    "CRUD": ("create read update delete",),
+    "SPA": ("single page application", "single-page application"),
+    "CV": (),  # deliberately empty: see the note above. Listed so nobody re-adds it.
+}
+
+
+def _equivalence_groups() -> dict[str, tuple[str, ...]]:
+    """Every spelling of one concept, indexed by each of those spellings.
+
+    Built once from ALIASES and EXPANSIONS rather than written out, so adding an alias in
+    one place makes it usable from every direction.
+    """
+    groups: dict[str, list[str]] = {}
+
+    def add(key: str, *names: str) -> None:
+        bucket = groups.setdefault(key.casefold(), [])
+        bucket.extend(n for n in names if n and n not in bucket)
+
+    for alias, name in ALIASES.items():
+        add(name, name, alias)
+    for term, expansions in EXPANSIONS.items():
+        add(canonical(term) or term, term, *expansions)
+
+    index: dict[str, tuple[str, ...]] = {}
+    for members in groups.values():
+        frozen = tuple(dict.fromkeys(members))
+        for member in frozen:
+            index.setdefault(member.casefold(), frozen)
+    return index
+
+
+def equivalents(term: str) -> tuple[str, ...]:
+    """Other ways of writing `term` that mean exactly the same thing.
+
+    Empty for anything not in a group, which is most words. Callers treat this as "also
+    accept these", never as "rewrite to these" — the résumé keeps whatever spelling the
+    posting used.
+    """
+    key = (term or "").strip().casefold()
+    if not key:
+        return ()
+    group = _EQUIVALENTS.get(key) or _EQUIVALENTS.get(canonical(term).casefold(), ())
+    return tuple(name for name in group if name.casefold() != key)
+
+
+# Derivations of a tool's name that are still that tool. "Dockerized the worker" is a claim
+# about Docker; "containerised" is not a claim about anything. Only suffixes that build an
+# adjective or a verb from a proper noun are listed — plurals are handled separately, and a
+# bare "s"/"es" rule would let "Reds" license "Red".
+_DERIVATIONS = ("ization", "isation", "izing", "ising", "ized", "ised", "ify", "ing", "ed")
+
+
+def base_forms(term: str) -> tuple[str, ...]:
+    """"Dockerized" -> ("Docker",). The name a derived word was built from, if any.
+
+    Longest suffix first, and only the first match: stripping "ed" off "Dockerized" as well
+    would produce "Dockeriz", which is not a word anybody wrote down.
+    """
+    for suffix in sorted(_DERIVATIONS, key=len, reverse=True):
+        if len(term) > len(suffix) + 2 and term.casefold().endswith(suffix):
+            return (term[: -len(suffix)],)
+    return ()
+
+
+# The same idea pointed the other way, and a much shorter list. A source note reading
+# "Dockerised the worker" says Docker; the claim side is where the risk lives, because
+# growing a tool name into a word is how "Spark" comes to be licensed by "sparked
+# interest". Only the suffixes that build a verb out of a proper noun are here — "-ed" and
+# "-ing" are not, and that is the whole reason this list differs from _DERIVATIONS.
+_TOOL_VERBS = ("ized", "ised", "ization", "isation", "ify")
+
+
+def derived_forms(term: str) -> tuple[str, ...]:
+    """"Docker" -> ("Dockerized", "Dockerised", ...). Spellings of a source that would still
+    be naming this tool. Multi-word terms and two-letter names are skipped: "Go" grows into
+    far too much."""
+    if not term or " " in term or len(term) < 3:
+        return ()
+    stem = term[:-1] if term.endswith("e") else term
+    return tuple(dict.fromkeys(stem + suffix for suffix in _TOOL_VERBS))
 
 # A token that is technical on its face even though nobody curated it: an ALLCAPS acronym,
 # a CamelCase product name, a version-tagged tool (Python3, H100, GPT-4), a dotted or
@@ -122,6 +236,10 @@ def canonical(term: str) -> str:
     """Fold spelling variants onto one name so coverage is measured on meaning."""
     key = (term or "").strip().casefold().rstrip(".")
     return ALIASES.get(key) or _BY_NORM.get(key) or (term or "").strip()
+
+
+# Built after canonical() because it uses it. Module-level so the grouping is computed once.
+_EQUIVALENTS: dict[str, tuple[str, ...]] = _equivalence_groups()
 
 
 def find_terms(text: str) -> list[str]:
