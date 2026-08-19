@@ -3,18 +3,25 @@
 ground.py already answers "is any of this false?". This answers the other question, which
 is the one that actually gets letters thrown away: **is any of this worth reading?**
 
-The evidence is worth stating, because it is the reason this module exists rather than a
-longer prompt. Recruiter surveys through 2025–26 agree on three things with unusual
-consistency, and all three are checkable:
+Three things this is built on, and the third one is not what it first looks like:
 
   1. A letter is read, often before the résumé, and a bad one disqualifies a candidate the
      résumé would have got through. So the letter is not decoration.
   2. The opening sentence is where it is lost. "I am writing to express my interest in the
-     X position" is the single most common first line in the pile and says nothing; it also
-     signals a template, which is the specific thing a reader is scanning for.
-  3. Readers report recognising AI-written applications, and report reacting badly. The
-     tells they name are not subtle — they are a small, stable vocabulary of words that
-     almost nobody uses in speech, plus a rhythm of unsupported superlatives.
+     X position" says nothing and signals a template, which is the specific thing a reader
+     is scanning for. HBR, Cornell and Harvard name it independently. (Princeton prints it
+     in its own "best" example, so this is a strong majority rather than unanimity.)
+  3. Readers *report* recognising machine-written applications and report reacting badly.
+     **What they cannot actually do is detect it.** The only controlled measurements put
+     humans at 50–52% on exactly this task — chance — including 51.6% in a professional
+     self-presentation condition with incentives (Jakesch, Hancock & Naaman, PNAS 120(11),
+     n=4,600 across six experiments); a later side-by-side study got 55.4% and found people
+     "made the most errors precisely when they were most certain".
+
+So the vocabulary checks below are **not** here because a reader will catch the model. They
+are here because the phrases are empty, unverifiable, and in every other letter in the pile,
+which makes them worth cutting for a reader who has never thought about AI at all. That is a
+weaker claim than "you will be caught" and it is the one the evidence supports.
 
 The prompt in cover.py already asks for all of this. A prompt is a request; this is the
 check. That distinction is the same one ground.py rests on, and it exists for the same
@@ -60,35 +67,70 @@ DEAD_OPENINGS = re.compile(
 # convention; this is the one everybody has been told to stop using.
 DEAD_ADDRESSEES = re.compile(r"to whom it may concern|dear sir(?: or madam)?|dear madam", re.I)
 
-# Words and phrases repeatedly named in 2025-26 hiring surveys as what makes a reader think
-# "a model wrote this". Kept short and specific on purpose: a long list would start catching
-# ordinary English, and a false positive here costs an iteration.
-AI_TELLS = (
-    "delve", "tapestry", "testament to", "navigate the complexities", "in today's fast-paced",
-    "ever-evolving", "in the ever-changing", "i am confident that my skills",
-    "align perfectly with", "aligns perfectly with", "leverage my expertise",
-    "leveraging my", "a proven track record of success", "cutting-edge solutions",
-    "game-changer", "synergy", "synergies", "meticulous attention to detail",
-    "seamlessly integrate", "robust solutions", "unwavering commitment",
-    "i am particularly drawn to", "resonates deeply", "wealth of experience",
-    "hit the ground running", "think outside the box", "wear many hats",
+# Vocabulary an LLM measurably over-produces, from the one empirical corpus there is: Kobak
+# et al., Science Advances 2025, which compared 15M biomedical abstracts before and after
+# LLMs and annotated 407 excess style words with frequency ratios. The entries here are the
+# high-ratio, low-base-rate tail — "delve" at 47.8x, "underscores" and "showcasing" at 13.8x,
+# "meticulously" 10.5x, "intricate" 7.4x.
+#
+# Short on purpose, and the reason is in that 407. Most of the full list is ordinary English
+# — it contains "across", "both", "this", "were", "while", "including" — so matching against
+# all of it would flag normal prose. A false positive here costs an iteration.
+#
+# What is deliberately NOT here: "thrilled", "passionate", "excited", "proven". They are the
+# register a cover letter is written in, and the corpus shows no excess for any of them
+# (0.00x, 0.80x, 1.04x, 0.95x). Banning them would be styling on a hunch. The *opening*
+# "I am excited to apply" is caught above, and for a different and better reason.
+LLM_EXCESS = (
+    "delve", "delving", "delves", "tapestry", "underscores", "underscoring", "showcasing",
+    "meticulous", "meticulously", "intricate", "garnered", "realm", "pivotal",
+    "multifaceted", "groundbreaking", "unparalleled", "transformative", "invaluable",
+    "commendable", "noteworthy", "testament to", "navigate the complexities",
+    "seamlessly integrate", "leveraging my",
 )
 
-# Praise aimed at the employer. It costs words, it is unverifiable, and every other letter
-# in the pile contains it — so it cannot distinguish this one.
+# Business clichés. These are NOT AI tells — every one of them predates LLMs by decades, and
+# calling them evidence of a model would be a claim nothing supports. They are here for a
+# plainer reason: they are empty, and a reader has seen each of them a hundred times.
+BUSINESS_CLICHE = (
+    "synergy", "synergies", "game-changer", "hit the ground running",
+    "think outside the box", "wear many hats", "a proven track record of success",
+    "cutting-edge solutions", "wealth of experience", "robust solutions",
+    "unwavering commitment", "in today's fast-paced", "ever-evolving",
+    "in the ever-changing", "i am confident that my skills", "align perfectly with",
+    "aligns perfectly with", "i am particularly drawn to",
+)
+
+# Praise aimed at the employer. Unverifiable, and it spends the letter's words on the
+# reader's own organisation. HBR's advice is "don't go overboard with the flattery"; nobody
+# has measured what it actually costs a candidate, so this stays advisory. Several of these
+# — renowned, esteemed, prestigious — are separately catalogued as the promotional register
+# typical of machine-written text, so they sit in two categories at once.
 FLATTERY = (
     "industry leader", "leading provider", "world-class", "i have long admired",
     "i have always admired", "your innovative", "your impressive", "your renowned",
     "esteemed", "prestigious", "your amazing", "your incredible",
 )
 
-# One page, and the band rather than a target. Under about 180 words a letter has not said
-# anything a résumé did not; over about 400 it stops being read, which is worse than not
-# having sent one.
-MIN_WORDS = 150
-MAX_WORDS = 420
+# Two different numbers, and they are not the same thing.
+#
+# The TARGET, which the prompt asks for: 250-400 words. Princeton says 250-400; Anthropic's
+# own application form says "great answers are often 200-400 words"; Harvard converges. HBR
+# goes further — "brief enough that someone can read it at a glance" — and the timing data
+# (84% of readers spend under a minute) puts 400 at the ceiling of what actually gets read.
+#
+# The BAND, which the check tolerates. It is deliberately wider at the bottom, because a
+# check exists to catch clear problems and spending a model call to grow a tight 230-word
+# letter would be optimising the metric rather than the letter. No source states a minimum at
+# all, so the floor is a house judgement about whether the letter has said anything — and it
+# is labelled as one wherever the user sees it.
+TARGET_WORDS = (250, 400)
+MIN_WORDS = 200
+MAX_WORDS = 400
+# Yale is the most specific source and says three to four paragraphs. UNC says 3-5 and MIT's
+# structure yields 4-5, so 3-5 is the union of the sources and 3-4 is the consensus.
 MIN_PARAGRAPHS = 3
-MAX_PARAGRAPHS = 5
+MAX_PARAGRAPHS = 4
 
 
 @dataclass
@@ -172,8 +214,10 @@ def check_length(letter: CoverLetter) -> LetterCheck:
         ok,
         f"{count} words"
         + ("" if ok else f", outside the {MIN_WORDS}-{MAX_WORDS} band"),
-        fix=f"Aim for {MIN_WORDS}-{MAX_WORDS} words. Under that it has not said anything the "
-            "résumé did not; over it, it stops being read, which is worse than not sending one.",
+        fix=f"Aim for {TARGET_WORDS[0]}-{TARGET_WORDS[1]} words (Princeton's number, and roughly "
+            f"Anthropic's own application form). The {MIN_WORDS}-word floor this check uses is "
+            "looser and is a house judgement — no source states a minimum. The ceiling is not: "
+            "past 400 it stops being read, which is worse than not sending one.",
     )
 
 
@@ -228,14 +272,51 @@ def check_answers_the_posting(letter: CoverLetter, jd: JobDescription) -> Letter
 
 
 def check_ai_tells(letter: CoverLetter) -> LetterCheck:
-    found = _phrases_in(letter.body_text(), AI_TELLS)
+    found = _phrases_in(letter.body_text(), LLM_EXCESS)
     return LetterCheck(
-        "no phrases that read as machine-written",
+        "no vocabulary a model over-produces",
         not found,
         "none found" if not found else f"found: {', '.join(found)}",
         kind="advisory",
-        fix="Say it the way you would say it out loud. Readers report recognising these and "
-            "report reacting badly to them; the words are the tell, not the content.",
+        fix="Say it the way you would say it out loud. Not because a reader will catch the "
+            "model — the controlled measurements put people at chance on that — but because "
+            "these are words almost nobody uses in speech, and a sentence that needs one is "
+            "usually a sentence with nothing in it.",
+    )
+
+
+def check_cliches(letter: CoverLetter) -> LetterCheck:
+    found = _phrases_in(letter.body_text(), BUSINESS_CLICHE)
+    return LetterCheck(
+        "no business clichés",
+        not found,
+        "none found" if not found else f"found: {', '.join(found)}",
+        kind="advisory",
+        fix="Cut them. They predate LLMs by decades — this is not a claim about how the "
+            "letter was written — and a reader has seen each of them a hundred times, which "
+            "is exactly why they cannot distinguish this letter from any other.",
+    )
+
+
+def check_names_the_company(letter: CoverLetter, jd: JobDescription) -> LetterCheck:
+    """Does the letter say who it is to?
+
+    The opposite failure — naming the *wrong* company, the classic disaster — is already
+    impossible here: a company name is a CamelCase token, and ground.check_letter rejects any
+    that is not in the allowlist derived from this posting. So the only half left to check is
+    the positive one, and it is the half a form letter fails.
+    """
+    if not jd.company:
+        return LetterCheck("names the company", True, "the posting does not name one",
+                           kind="advisory")
+    named = contains_term(letter.body_text(), jd.company)
+    return LetterCheck(
+        "names the company",
+        named,
+        f"{jd.company} appears" if named else f"{jd.company} is never mentioned",
+        kind="advisory",
+        fix="Say who it is to, once, where it does some work — attached to the thing about "
+            "the role you are actually answering, not as a compliment.",
     )
 
 
@@ -253,7 +334,11 @@ def check_flattery(letter: CoverLetter) -> LetterCheck:
 
 def check_i_openings(letter: CoverLetter) -> LetterCheck:
     """Every paragraph starting "I" turns a letter into a list of assertions about the
-    writer. One or two is how English works; all of them is a rhythm the reader notices."""
+    writer. One or two is how English works; all of them is a rhythm the reader notices.
+
+    Nobody publishes a threshold for this. It is a house heuristic, it is advisory, and it
+    does not belong in the same sentence as anything a parser vendor documents.
+    """
     if len(letter.paragraphs) < 3:
         return LetterCheck("varies how the paragraphs open", True, "too few paragraphs to judge",
                            kind="advisory")
@@ -295,7 +380,9 @@ def review(letter: CoverLetter, jd: JobDescription, profile: Profile | None = No
         check_shape(letter),
         check_specifics(letter),
         check_answers_the_posting(letter, jd),
+        check_names_the_company(letter, jd),
         check_ai_tells(letter),
+        check_cliches(letter),
         check_flattery(letter),
         check_i_openings(letter),
         check_not_the_advert(letter, jd),

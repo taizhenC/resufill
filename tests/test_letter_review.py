@@ -36,7 +36,7 @@ CLOSE = (
     "tidepool, a side project, packs 40 years of NOAA harmonic constants into a 6 MB SQLite "
     "file so lookups work with no network. It exists because the official tables are only "
     "available online and I wanted them on a boat. I would be glad to talk through either of "
-    "these, or about what the first month on your ingestion path would look like."
+    "these, or about what the first month on Northwind's ingestion path would look like."
 )
 
 
@@ -145,7 +145,7 @@ def test_length_is_a_band_not_a_target(example_profile):
     assert not _check(review(short, POSTING, example_profile), "fits on a page and says something").ok
 
     long = _letter(REAL_WORK, MIDDLE * 4, CLOSE)
-    assert long.word_count() > 420
+    assert long.word_count() > 400
     assert not _check(review(long, POSTING, example_profile), "fits on a page and says something").ok
 
 
@@ -159,21 +159,62 @@ def test_two_paragraphs_is_not_a_letter(example_profile):
 # --------------------------------------------------------------- advisory ----
 
 
-def test_the_machine_written_vocabulary_is_advisory(example_profile):
+def test_the_measured_llm_vocabulary_is_advisory(example_profile):
     """Worth saying; not worth a model call on its own. A letter that says "delve" is a
-    slightly worse letter, not a broken one."""
+    slightly worse letter, not a broken one — and the reason it is worth cutting is that
+    almost nobody says it, NOT that a reader will catch the model. On that task the
+    controlled measurements put people at chance."""
     letter = _letter(
         REAL_WORK,
-        MIDDLE + " I would love to delve into the ever-evolving data platform space with you.",
+        MIDDLE + " I would love to delve into the intricate work Northwind is showcasing.",
         CLOSE,
     )
     result = review(letter, POSTING, example_profile)
-    check = _check(result, "no phrases that read as machine-written")
+    check = _check(result, "no vocabulary a model over-produces")
 
     assert not check.ok
     assert not check.blocking
     assert result.ok  # advisory alone never forces a retry
-    assert "delve" in check.detail
+    assert "delve" in check.detail and "intricate" in check.detail
+
+
+def test_the_register_a_cover_letter_is_written_in_is_left_alone(example_profile):
+    """"thrilled", "passionate", "excited" and "proven" are what a cover letter sounds like,
+    and the one corpus that measured LLM excess shows none for any of them — 0.00x, 0.80x,
+    1.04x, 0.95x. Flagging them would be styling on a hunch."""
+    letter = _letter(
+        REAL_WORK,
+        MIDDLE + " I am genuinely excited about this, and proven ingestion work is what I want.",
+        CLOSE,
+    )
+    assert _check(
+        review(letter, POSTING, example_profile), "no vocabulary a model over-produces"
+    ).ok
+
+
+def test_business_cliches_are_a_separate_finding_with_a_separate_reason(example_profile):
+    """These predate LLMs by decades. Calling them evidence of a model would be a claim
+    nothing supports; they are worth cutting because they are empty."""
+    letter = _letter(
+        REAL_WORK,
+        MIDDLE + " I would hit the ground running and bring real synergy to Northwind.",
+        CLOSE,
+    )
+    check = _check(review(letter, POSTING, example_profile), "no business clichés")
+
+    assert not check.ok and not check.blocking
+    assert "hit the ground running" in check.detail
+
+
+def test_a_letter_that_never_says_who_it_is_to_is_noticed(example_profile):
+    """The opposite failure — naming the *wrong* company — cannot happen here: a company name
+    is a CamelCase token and the grounding gate rejects any that is not in this posting's
+    allowlist. Only the positive half is left, and it is the half a form letter fails."""
+    letter = _letter(REAL_WORK, MIDDLE, CLOSE.replace("Northwind's", "your"))
+    check = _check(review(letter, POSTING, example_profile), "names the company")
+
+    assert not check.ok and not check.blocking
+    assert "Northwind" in check.detail
 
 
 def test_flattery_is_advisory(example_profile):

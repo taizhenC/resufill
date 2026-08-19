@@ -81,7 +81,10 @@ class Settings(BaseSettings):
     RESUME_SUMMARY: bool = False
     # A cover letter that runs to two pages does not get read; the budget is the point.
     COVER_LETTER_MAX_PAGES: int = 1
-    COVER_LETTER_WORDS: int = 300
+    # 250-400 is the one number the sources agree on: Princeton says it, Anthropic's own
+    # application form says "great answers are often 200-400 words", Harvard converges. 350
+    # sits inside it and leaves the writer room to be cut back rather than padded out.
+    COVER_LETTER_WORDS: int = 350
     COVER_LETTER_TONE: str = "direct and specific; no filler, no flattery, no restating the job ad"
     # Used when the posting names no addressee (PLAN.md open question 4).
     COVER_LETTER_FALLBACK_ADDRESSEE: str = "Hiring Manager"
