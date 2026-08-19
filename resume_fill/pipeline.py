@@ -41,6 +41,7 @@ from .document import CoverLetter, ResumeDoc
 from .evidence import Corpus
 from .jd import JobDescription
 from .llm import LLMCall
+from .meter import Meter
 from .profile import Profile
 from .progress import (
     CANCELLED,
@@ -359,7 +360,8 @@ def _stop_reason(attempt: Attempt, previous_best: float, limit: Ceiling, cfg: Se
 
 
 def resume_report(
-    result: RunResult, profile: Profile, jd: JobDescription, index: SourceIndex, cfg: Settings
+    result: RunResult, profile: Profile, jd: JobDescription, index: SourceIndex, cfg: Settings,
+    meter: Meter | None = None,
 ) -> str:
     best = result.best
     return report_module.build(
@@ -371,6 +373,7 @@ def resume_report(
         threshold=cfg.SCORE_THRESHOLD, blocked_terms=result.blocked_terms,
         violations=best.violations,
         ceiling=result.ceiling, stop_reason=result.why_stopped(),
+        cost=meter.summary() if meter else "",
     )
 
 
@@ -558,6 +561,8 @@ class Run:
     cover: CoverRun | None = None
     cancelled: bool = False
     record_path: Path | None = None
+    # What the run actually cost. None when nobody was counting.
+    meter: Meter | None = None
 
     @property
     def ok(self) -> bool:
@@ -575,6 +580,7 @@ def run(
     out_dir: Path,
     mode: str = "both",
     progress: Progress | None = None,
+    meter: Meter | None = None,
 ) -> Run:
     if mode not in MODES:
         raise ValueError(f"mode must be one of {MODES}, got {mode!r}")
@@ -615,7 +621,7 @@ def run(
 
     sections = []
     if resume_result is not None:
-        sections.append(resume_report(resume_result, profile, jd, index, cfg))
+        sections.append(resume_report(resume_result, profile, jd, index, cfg, meter))
     if cover_result is not None:
         sections.append(report_module.cover_section(cover_result, jd, index))
     report_path.write_text("\n".join(sections), encoding="utf-8")
@@ -624,8 +630,9 @@ def run(
         out_dir=out_dir, mode=mode, report_path=report_path,
         resume=resume_result, cover=cover_result, cancelled=cancelled,
     )
+    result.meter = meter
     result.record_path = runrecord.save(
-        build_record(result, jd, index, cfg), out_dir
+        build_record(result, jd, index, cfg, meter), out_dir
     )
     if progress is not None:
         stage = CANCELLED if cancelled else DONE
@@ -636,7 +643,7 @@ def run(
 
 
 def build_record(
-    result: Run, jd: JobDescription, index: SourceIndex, cfg: Settings
+    result: Run, jd: JobDescription, index: SourceIndex, cfg: Settings, meter: Meter | None = None
 ) -> runrecord.RunRecord:
     """The structured account of the run, for anything that is not a human reading prose."""
     documents: list[runrecord.DocumentRecord] = []
@@ -695,6 +702,7 @@ def build_record(
             "strict_score": cfg.STRICT_SCORE,
             "model": cfg.LLM_MODEL,
         },
+        usage=meter.as_dict() if meter else {},
         score=runrecord.score_record(
             result.resume.best.score if result.resume else None, cfg.SCORE_THRESHOLD,
             ceiling=result.resume.ceiling if result.resume else None,

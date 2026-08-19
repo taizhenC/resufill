@@ -258,6 +258,7 @@ def cmd_gen(args: argparse.Namespace) -> int:
     from . import evidence, llm
     from . import jd as jd_module
     from .config import settings
+    from .meter import Meter
     from .pipeline import run, run_dir
     from .profile import ProfileError, load_profile
     from .progress import Progress
@@ -291,7 +292,12 @@ def cmd_gen(args: argparse.Namespace) -> int:
         print(f"{BAD} {exc}")
         return 1
 
-    job = jd_module.parse(posting, lambda s, u: llm.complete_json(s, u, cfg=cfg))
+    meter = Meter()
+
+    def call(system: str, user: str) -> dict:
+        return llm.complete_json(system, user, cfg=cfg, meter=meter)
+
+    job = jd_module.parse(posting, call)
     corpus = evidence.load(cfg.EVIDENCE_PATH)
     out_dir = Path(args.out) if args.out else run_dir(job, cfg)
     mode = "cover" if args.cover else ("resume" if args.resume else "both")
@@ -305,9 +311,8 @@ def cmd_gen(args: argparse.Namespace) -> int:
 
     try:
         result = run(
-            profile, job, corpus, cfg,
-            lambda s, u: llm.complete_json(s, u, cfg=cfg),
-            out_dir=out_dir, mode=mode, progress=Progress(sink=_stage_line),
+            profile, job, corpus, cfg, call,
+            out_dir=out_dir, mode=mode, progress=Progress(sink=_stage_line), meter=meter,
         )
     except (llm.LLMError, RenderError) as exc:
         print(f"{BAD} {exc}")
@@ -319,6 +324,7 @@ def cmd_gen(args: argparse.Namespace) -> int:
         code |= _report_resume(result.resume, cfg)
     if result.cover is not None:
         code |= _report_cover(result.cover)
+    print(f"{INFO} cost:   {meter.summary()}")
     print(f"{INFO} report: {result.report_path}")
     if result.record_path:
         print(f"{INFO} record: {result.record_path}")

@@ -327,3 +327,21 @@ def test_analyze_costs_no_model_call(client, monkeypatch):
 
 def test_analyze_refuses_an_empty_posting(client):
     assert client.post("/api/analyze", json={"jd": ""}).status_code == 422
+
+
+@needs_chromium
+def test_a_run_exposes_what_it_cost(client):
+    """The wiring, not the arithmetic — test_meter.py owns the counting.
+
+    The figures are zero here on purpose: the meter counts inside llm.complete_json, which
+    these tests replace with a stub, and a stub is not a provider. What is being asserted is
+    that both the live snapshot and the saved record carry the field, because the browser is
+    the only place the price of another iteration is visible while there is still time to
+    cancel one.
+    """
+    client.post("/api/runs", json={"jd": JD, "mode": "resume"})
+    assert client.runner.wait(120)
+
+    assert "usage" in client.get("/api/runs/current").json()
+    run_id = client.get("/api/runs").json()["runs"][0]["run_id"]
+    assert "usage" in client.get(f"/api/runs/{run_id}").json()

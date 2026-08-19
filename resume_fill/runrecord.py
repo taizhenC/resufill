@@ -130,6 +130,9 @@ class RunRecord(BaseModel):
     cancelled: bool = False
     jd: JobRecord = Field(default_factory=JobRecord)
     settings: dict[str, float | int | bool | str] = Field(default_factory=dict)
+    # What the run cost: model calls, tokens, and seconds spent waiting on the model. Empty
+    # for a run made before this was counted. Deliberately not a price — see meter.py.
+    usage: dict[str, float | int] = Field(default_factory=dict)
     score: ScoreRecord | None = None
     documents: list[DocumentRecord] = Field(default_factory=list)
 
