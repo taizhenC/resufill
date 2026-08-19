@@ -293,3 +293,37 @@ def test_the_built_index_is_served_when_it_exists(client, monkeypatch, tmp_path)
     response = client.get("/")
     assert response.status_code == 200
     assert "resume-fill" in response.text
+
+
+# --------------------------------------------------------------- analyse ----
+
+
+def test_analyze_answers_before_anything_is_spent(client):
+    """The question people open the tool with — is this posting worth applying to, and what
+    will it say I am missing — costs nothing to answer: the lexicon pass and the ceiling
+    both run without a model."""
+    body = client.post("/api/analyze", json={"jd": JD}).json()
+
+    assert body["deterministic"] is True
+    assert body["jd"]["title"] == "Backend Engineer, Data Platform"
+    assert body["jd"]["company"] == "Northwind"
+    assert body["ceiling"]["total"] == HONEST_CEILING
+    assert body["ceiling"]["unreachable"] == ["Kubernetes"]
+    # This server's threshold is 70 and the ceiling is 71.2, so it is reachable — barely,
+    # and only by a draft that surfaces everything the record has.
+    assert body["ceiling"]["reachable"] is True
+    assert body["ceiling"]["threshold"] == 70
+    assert "Python" in body["covered"] and "PostgreSQL" in body["covered"]
+    assert "Kubernetes" not in body["covered"]
+
+
+def test_analyze_costs_no_model_call(client, monkeypatch):
+    def explode(*args, **kwargs):
+        raise AssertionError("the preview must not call the model")
+
+    monkeypatch.setattr("resume_fill.llm.complete_json", explode)
+    assert client.post("/api/analyze", json={"jd": JD}).status_code == 200
+
+
+def test_analyze_refuses_an_empty_posting(client):
+    assert client.post("/api/analyze", json={"jd": ""}).status_code == 422
