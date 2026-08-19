@@ -18,8 +18,8 @@ def test_example_profile_is_valid(example_profile):
 
 
 def test_format_range_treats_empty_end_as_present():
-    assert format_range("2025-06", "2025-08") == "Jun 2025 – Aug 2025"
-    assert format_range("2025-01", "") == "Jan 2025 – Present"
+    assert format_range("2025-06", "2025-08") == "June 2025 – August 2025"
+    assert format_range("2025-01", "") == "January 2025 – Present"
     # Hand-written values survive untouched, so editing the file by hand is not a trap.
     assert format_range("Summer 2024", "") == "Summer 2024 – Present"
 

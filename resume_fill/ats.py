@@ -55,10 +55,18 @@ STANDARD_HEADINGS = frozenset({
     "publications", "awards", "volunteer experience",
 })
 
-# "Jun 2025 – Aug 2025", "Jun 2025 – Present". Unambiguous to a parser: a real month, a
-# four-digit year, and a range separator. What fails this is what a parser also fails on —
-# "Summer 2024" (no month), "'23" (no century), "Ongoing" (not a date).
-_MONTH = r"(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)"
+# "June 2025 – August 2025", "June 2025 – Present". Unambiguous to a parser: a spelled-out
+# month, a four-digit year, and a range separator. What fails this is what a parser also
+# fails on — "Summer 2024" (no month), "'23" (no century), "Ongoing" (not a date).
+#
+# Spelled out, because the abbreviations are not equally safe. OpenResume matches a month by
+# `text.includes(month) || text.includes(month[:4])`, so "May", "June", "July" and "Sept"
+# survive being shortened and "Jan", "Feb", "Mar", "Apr", "Aug", "Oct", "Nov" and "Dec" match
+# nothing. profile.format_month writes the full name; this is the assertion that a
+# hand-written date in profile.yaml did too.
+_MONTH = (
+    r"(?:January|February|March|April|May|June|July|August|September|October|November|December)"
+)
 DATE_RANGE = re.compile(
     rf"^{_MONTH}\s+\d{{4}}\s*[-–—]\s*(?:{_MONTH}\s+\d{{4}}|Present)$|^(?:{_MONTH}\s+\d{{4}}|Present)$"
 )
@@ -199,8 +207,10 @@ def check_dates(doc: ResumeDoc, profile: Profile) -> Check:
         not bad,
         "every entry's dates are month-and-year" if not bad
         else f"{len(bad)} entr(y/ies) a parser cannot read as a date: {'; '.join(bad[:3])}",
-        fix="Write start/end in profile.yaml as YYYY-MM. 'Summer 2024' and \"'23\" have no "
-            "month or no century, and a parser drops the whole range rather than guessing.",
+        fix="Write start/end in profile.yaml as YYYY-MM and this formats itself. 'Summer 2024' "
+            "and \"'23\" have no month or no century, and a parser drops the whole range rather "
+            "than guessing; a shortened month name ('Aug 2025') matches nothing in at least one "
+            "real parser's month table.",
     )
 
 

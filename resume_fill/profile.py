@@ -19,7 +19,21 @@ from pydantic import BaseModel, Field, ValidationError
 from .source import Source, SourceIndex
 from .textutil import truncate
 
-_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+# Spelled out, and this is not a style choice.
+#
+# iCIMS says it directly: "spell out abbreviations for things like months and years. For
+# example, write 'August 2020' instead of 'Aug. '20'." The mechanism is visible in
+# OpenResume's month matcher, which tests `text.includes(month) || text.includes(month[:4])`
+# against the full names — so "May", "June", "July" and "Sept" survive abbreviation and
+# "Jan", "Feb", "Mar", "Apr", "Aug", "Oct", "Nov", "Dec" **do not match at all**. This tool
+# used to emit exactly those.
+#
+# Reading is unaffected: the ingest side still parses whatever a real résumé or a LinkedIn
+# export happens to contain. This is only what gets written.
+_MONTHS = [
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December",
+]
 
 
 class ProfileError(RuntimeError):
@@ -39,8 +53,9 @@ def slug(text: str, limit: int = 28) -> str:
 
 
 def format_month(value: str) -> str:
-    """"2024-06" -> "Jun 2024". Anything that is not YYYY-MM is passed through untouched,
-    so a hand-written "Summer 2024" survives editing."""
+    """"2024-06" -> "June 2024". Anything that is not YYYY-MM is passed through untouched,
+    so a hand-written "Summer 2024" survives editing — and gets flagged by ats.check_dates,
+    which is the better place to argue with it than silently rewriting a person's record."""
     match = re.fullmatch(r"(\d{4})-(\d{1,2})", (value or "").strip())
     if not match:
         return (value or "").strip()
@@ -49,7 +64,14 @@ def format_month(value: str) -> str:
 
 
 def format_range(start: str, end: str) -> str:
-    """An empty end date means the job is current — that is the convention throughout."""
+    """An empty end date means the job is current — that is the convention throughout.
+
+    "Present", capital P, and nothing else. OpenResume matches it as a case-sensitive
+    literal (`item.text.includes("Present")`), so "current", "now" and lowercase "present"
+    are invisible to it. The separator is a spaced en dash, which is CMU and Penn convention
+    — no parser documentation addresses the separator at all, and the sources that claim to
+    contradict each other, so this one is a house choice and is not defended as more.
+    """
     left, right = format_month(start), format_month(end) or "Present"
     return f"{left} – {right}" if left else right
 

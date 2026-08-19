@@ -58,12 +58,20 @@ def test_a_date_a_parser_cannot_read_is_a_parsing_failure(example_profile):
 
 
 def test_the_date_pattern_accepts_what_the_profile_actually_emits():
-    assert DATE_RANGE.match("Jun 2025 – Aug 2025")
-    assert DATE_RANGE.match("Jun 2025 – Present")
+    assert DATE_RANGE.match("June 2025 – August 2025")
+    assert DATE_RANGE.match("June 2025 – Present")
     assert DATE_RANGE.match("Present")
     assert not DATE_RANGE.match("Summer 2024 – Present")
     assert not DATE_RANGE.match("2024 – 2025")
     assert not DATE_RANGE.match("06/2024 - 08/2025")
+
+
+def test_a_shortened_month_is_not_accepted():
+    """OpenResume matches a month by `includes(month) || includes(month[:4])`, so "Aug" and
+    "Jan" match nothing in its table while "May", "June", "July" and "Sept" survive. The tool
+    writes the full name; this is what catches a hand-written date that did not."""
+    assert not DATE_RANGE.match("Aug 2025 – Present")
+    assert not DATE_RANGE.match("Jan 2024 – Mar 2025")
 
 
 def test_a_missing_email_is_a_parsing_failure_and_a_missing_phone_is_not(example_profile):
