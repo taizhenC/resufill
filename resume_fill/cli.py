@@ -260,6 +260,7 @@ def cmd_gen(args: argparse.Namespace) -> int:
 _STAGE_LABEL = {
     "tailoring": "writing",
     "grounding": "checking every claim",
+    "repaired": "kept what could be supported, cut the rest",
     "rejected": "rejected",
     "rendering": "rendering PDF",
     "verifying": "reading the PDF back",
@@ -292,9 +293,13 @@ def _report_cover(cover_run) -> int:
         for violation in best.violations[:10]:
             print(f"     - [{violation.kind}] {violation}")
         return 1
+    letter = best.document
     print(f"{OK} {best.rendered.pdf_path}")
-    print(f"{INFO} {best.letter.word_count()} words, {len(best.letter.paragraphs)} paragraphs, "
-          f"addressed to {best.letter.addressee}")
+    print(f"{INFO} {letter.word_count()} words, {len(letter.paragraphs)} paragraphs, "
+          f"addressed to {letter.addressee}")
+    if best.repair is not None and best.repair.dropped:
+        print(f"{WARN} {len(best.repair.dropped)} paragraph(s) removed - they claimed more "
+              "than the record supports")
     if cover_run.blocked_terms:
         print(f"{INFO} the gate blocked these claims: " + ", ".join(cover_run.blocked_terms[:12]))
     if not cover_run.ok:
@@ -320,6 +325,12 @@ def _report_resume(result, cfg) -> int:
         return 1
 
     print(f"{OK} {best.rendered.pdf_path}")
+    if best.repair is not None and best.repair.dropped:
+        # Not a failure and not silent either: the résumé is smaller than the model drafted,
+        # and the difference is the list of things the record could not back.
+        print(f"{WARN} {len(best.repair.dropped)} item(s) cut to keep every claim supported:")
+        for note in best.repair.notes()[:6]:
+            print(f"     - {note}")
     print(f"{INFO} {best.verify_report.summary()}")
     print(f"{INFO} score {best.total:.1f} / 100 (threshold {result.threshold:.0f})")
     for component in best.score.components:

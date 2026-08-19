@@ -5,7 +5,7 @@ the endpoints return, what they refuse, and that a run really does happen in a t
 import pytest
 from conftest import needs_chromium
 from fastapi.testclient import TestClient
-from test_pipeline import FABRICATED, HONEST, HONEST_CEILING, LETTER, POSTING
+from test_pipeline import HONEST, HONEST_CEILING, LETTER, POSTING, UNSALVAGEABLE
 
 from resume_fill.config import Settings
 
@@ -153,7 +153,7 @@ def test_starting_a_second_run_while_busy_is_a_409(client):
 
 @needs_chromium
 def test_a_run_that_cannot_be_grounded_reports_not_ok(client):
-    client.responses["resume"] = FABRICATED
+    client.responses["resume"] = UNSALVAGEABLE
     client.post("/api/runs", json={"jd": JD, "mode": "resume"})
     assert client.runner.wait(120)
 

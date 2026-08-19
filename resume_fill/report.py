@@ -158,7 +158,7 @@ def cover_section(cover_run, jd: JobDescription, index: SourceIndex) -> str:
     standing on.
     """
     best = cover_run.best
-    letter = best.letter
+    letter = best.document
     lines = [
         "",
         f"# Cover letter — {jd.company or 'unknown company'}",

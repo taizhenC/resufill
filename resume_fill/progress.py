@@ -29,6 +29,7 @@ Sink = Callable[[str, dict], None]
 PARSING_JD = "parsing_jd"
 TAILORING = "tailoring"
 GROUNDING = "grounding"
+REPAIRED = "repaired"
 REJECTED = "rejected"
 RENDERING = "rendering"
 VERIFYING = "verifying"
@@ -40,7 +41,7 @@ CANCELLED = "cancelled"
 
 # Ordered, for anything that wants to show a run's shape before it happens.
 STAGES = (
-    PARSING_JD, TAILORING, GROUNDING, REJECTED, RENDERING, VERIFYING, SCORING, SCORED,
+    PARSING_JD, TAILORING, GROUNDING, REPAIRED, REJECTED, RENDERING, VERIFYING, SCORING, SCORED,
     WRITING_REPORT, DONE, CANCELLED,
 )
 
